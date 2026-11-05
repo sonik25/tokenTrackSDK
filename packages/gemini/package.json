@@ -1,0 +1,23 @@
+{
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean"
+  },
+  "description": "TokenTrack gemini package",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "version": "0.1.0",
+  "files": [
+    "dist"
+  ],
+  "name": "@tokentrack/gemini",
+  "main": "./dist/index.cjs",
+  "exports": {
+    ".": {
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "module": "./dist/index.js",
+  "license": "MIT"
+}
