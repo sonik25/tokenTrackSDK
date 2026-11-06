@@ -1,4 +1,3 @@
-
 import type { TokenUsage } from '../src/types/usage.js';
 
 describe('TokenUsage', () => {

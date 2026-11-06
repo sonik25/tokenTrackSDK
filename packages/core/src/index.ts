@@ -11,16 +11,14 @@ export type { UsageEvent } from './types/usage-event.js';
 
 export type { MoneyAmount, CurrencyCode } from './types/money.js';
 
-export type {
-  EstimatedCost,
-  ReportedCost,
-  CostBreakdown,
-} from './types/cost.js';
+export type { EstimatedCost, ReportedCost, CostBreakdown } from './types/cost.js';
 
-export type {
-  ModelTokenPricing,
-  ModelPricing,
-  PricingSource,
-} from './types/pricing.js';
+export type { ModelTokenPricing, ModelPricing, PricingSource } from './types/pricing.js';
 
 export { calculateEstimatedCost } from './pricing/pricing-calculator.js';
+
+export type { StorageAdapter, OperationRecord } from './storage/storage-adapter.js';
+
+export { MemoryStorage } from './storage/memory-storage.js';
+
+export { JsonFileStorage } from './storage/json-file-storage.js';

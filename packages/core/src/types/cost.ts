@@ -1,4 +1,3 @@
-
 import type { CurrencyCode, MoneyAmount } from './money.js';
 
 /**
