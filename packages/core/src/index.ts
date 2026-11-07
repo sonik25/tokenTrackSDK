@@ -25,3 +25,7 @@ export { JsonFileStorage } from './storage/json-file-storage.js';
 
 export { OperationContext } from './operations/operation-context.js';
 export { OperationManager } from './operations/operation-manager.js';
+
+export type { OperationSummary } from './operations/operation-summary.js';
+
+export { calculateOperationSummary } from './operations/operation-summary-calculator.js';

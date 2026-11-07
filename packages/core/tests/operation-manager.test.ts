@@ -117,18 +117,16 @@ describe('OperationManager', () => {
   });
 
   it('should prevent completing an already completed operation', async () => {
-  const operationId = await manager.start('test-operation');
+    const operationId = await manager.start('test-operation');
 
-  await manager.complete(operationId);
+    await manager.complete(operationId);
 
-  await expect(manager.complete(operationId)).rejects.toThrow(
-    `Operation is already completed: ${operationId}`,
-  );
-});
+    await expect(manager.complete(operationId)).rejects.toThrow(
+      `Operation is already completed: ${operationId}`,
+    );
+  });
 
-it('should throw an error when failing an unknown operation', async () => {
-  await expect(manager.fail('unknown-id')).rejects.toThrow(
-    'Operation not found: unknown-id',
-  );
-});
+  it('should throw an error when failing an unknown operation', async () => {
+    await expect(manager.fail('unknown-id')).rejects.toThrow('Operation not found: unknown-id');
+  });
 });
