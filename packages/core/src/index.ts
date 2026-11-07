@@ -22,3 +22,6 @@ export type { StorageAdapter, OperationRecord } from './storage/storage-adapter.
 export { MemoryStorage } from './storage/memory-storage.js';
 
 export { JsonFileStorage } from './storage/json-file-storage.js';
+
+export { OperationContext } from './operations/operation-context.js';
+export { OperationManager } from './operations/operation-manager.js';
