@@ -1,6 +1,7 @@
 import { MemoryStorage } from '../src/storage/memory-storage.js';
 import { OperationManager } from '../src/operations/operation-manager.js';
 import { OperationContext } from '../src/operations/operation-context.js';
+import type { UsageEvent } from '../src/types/usage-event.js';
 
 describe('OperationManager', () => {
   let storage: MemoryStorage;
@@ -128,5 +129,76 @@ describe('OperationManager', () => {
 
   it('should throw an error when failing an unknown operation', async () => {
     await expect(manager.fail('unknown-id')).rejects.toThrow('Operation not found: unknown-id');
+  });
+
+  it('should return a summary for an existing operation', async () => {
+    const operationId = await manager.start('test-operation');
+
+    await manager.complete(operationId);
+
+    const summary = await manager.getSummary(operationId);
+
+    expect(summary).toMatchObject({
+      operationId,
+      name: 'test-operation',
+      status: 'completed',
+      usageEventCount: 0,
+      childOperationCount: 0,
+      estimatedCosts: [],
+      reportedCosts: [],
+    });
+  });
+
+  it('should include child operation usage in the parent summary', async () => {
+    let parentId = '';
+    let childId = '';
+
+    await manager.run('parent-operation', async () => {
+      parentId = context.getCurrentOperationId()!;
+
+      childId = await manager.start('child-operation');
+    });
+
+    const usageEvent: UsageEvent = {
+      id: 'event-1',
+      provider: 'openai',
+      model: 'gpt-4o',
+      operationId: childId,
+      timestamp: new Date().toISOString(),
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+      },
+    };
+
+    await storage.saveUsageEvent(usageEvent);
+
+    const summary = await manager.getSummary(parentId);
+
+    expect(summary.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+    });
+    expect(summary.usageEventCount).toBe(1);
+    expect(summary.childOperationCount).toBe(1);
+  });
+
+  it('should return an empty summary when no usage events exist', async () => {
+    const operationId = await manager.start('empty-operation');
+
+    const summary = await manager.getSummary(operationId);
+
+    expect(summary.usageEventCount).toBe(0);
+    expect(summary.usage).toEqual({});
+    expect(summary.estimatedCosts).toEqual([]);
+    expect(summary.reportedCosts).toEqual([]);
+  });
+
+  it('should throw an error when retrieving an unknown operation summary', async () => {
+    await expect(manager.getSummary('unknown-id')).rejects.toThrow(
+      'Operation not found: unknown-id',
+    );
   });
 });
