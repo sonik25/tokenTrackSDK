@@ -361,4 +361,77 @@ describe('calculateOperationSummary', () => {
       calculateOperationSummary(rootOperation, [rootOperation], [firstEvent, secondEvent]),
     ).toThrow('Aggregated token count exceeds the maximum safe integer.');
   });
+
+  it('should preserve failed operation status and completion time', () => {
+    const failedOperation: OperationRecord = {
+      id: 'op-failed',
+      name: 'Failed Payment',
+      startedAt: '2026-11-07T10:00:00.000Z',
+      completedAt: '2026-11-07T10:00:05.000Z',
+      status: 'failed',
+    };
+
+    const summary = calculateOperationSummary(failedOperation, [failedOperation], []);
+
+    expect(summary.status).toBe('failed');
+    expect(summary.completedAt).toBe('2026-11-07T10:00:05.000Z');
+    expect(summary.durationMs).toBe(5000);
+  });
+
+  it('should leave duration undefined when completion time is invalid or earlier than start time', () => {
+    const invalidOperation: OperationRecord = {
+      id: 'op-invalid-duration',
+      name: 'Invalid Duration',
+      startedAt: '2026-11-07T10:00:05.000Z',
+      completedAt: '2026-11-07T10:00:00.000Z',
+      status: 'completed',
+    };
+
+    const summary = calculateOperationSummary(invalidOperation, [invalidOperation], []);
+
+    expect(summary.durationMs).toBeUndefined();
+  });
+
+  it('should keep estimated costs separated by currency', () => {
+    const usdEvent: UsageEvent = {
+      ...usageEvent,
+      cost: {
+        estimatedCost: {
+          amount: '0.50',
+          currency: 'USD',
+          pricingVersion: 'v1',
+        },
+      },
+    };
+
+    const eurEvent: UsageEvent = {
+      ...usageEvent,
+      id: 'event-eur',
+      cost: {
+        estimatedCost: {
+          amount: '0.75',
+          currency: 'EUR',
+          pricingVersion: 'v1',
+        },
+      },
+    };
+
+    const summary = calculateOperationSummary(rootOperation, [rootOperation], [usdEvent, eurEvent]);
+
+    expect(summary.estimatedCosts).toHaveLength(2);
+    expect(summary.estimatedCosts).toEqual(
+      expect.arrayContaining([
+        {
+          amount: '0.5',
+          currency: 'USD',
+          pricingVersion: 'v1',
+        },
+        {
+          amount: '0.75',
+          currency: 'EUR',
+          pricingVersion: 'v1',
+        },
+      ]),
+    );
+  });
 });

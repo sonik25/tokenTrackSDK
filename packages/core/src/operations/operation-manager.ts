@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import type { OperationRecord, StorageAdapter } from '../storage/storage-adapter.js';
 import { OperationContext } from './operation-context.js';
+import type { OperationSummary } from './operation-summary.js';
+import { calculateOperationSummary } from './operation-summary-calculator.js';
 
 /**
  * Manages TokenTrack application operations.
@@ -73,6 +75,58 @@ export class OperationManager {
       completedAt: new Date().toISOString(),
       status: 'failed',
     });
+  }
+
+  /**
+   * Retrieves a dynamically calculated summary for an operation.
+   */
+  async getSummary(operationId: string): Promise<OperationSummary> {
+    const [operations, usageEvents] = await Promise.all([
+      this.storage.getOperations(),
+      this.storage.getUsageEvents(),
+    ]);
+
+    const operation = operations.find((item) => item.id === operationId);
+
+    if (!operation) {
+      throw new Error(`Operation not found: ${operationId}`);
+    }
+
+    return calculateOperationSummary(operation, operations, usageEvents);
+  }
+
+  /**
+   * Retrieves dynamically calculated summaries for all operations.
+   */
+  async getAllSummaries(): Promise<OperationSummary[]> {
+    const [operations, usageEvents] = await Promise.all([
+      this.storage.getOperations(),
+      this.storage.getUsageEvents(),
+    ]);
+
+    return operations.map((operation) =>
+      calculateOperationSummary(operation, operations, usageEvents),
+    );
+  }
+
+  /**
+   * Retrieves dynamically calculated summaries for direct child operations.
+   */
+  async getChildSummaries(operationId: string): Promise<OperationSummary[]> {
+    const [operations, usageEvents] = await Promise.all([
+      this.storage.getOperations(),
+      this.storage.getUsageEvents(),
+    ]);
+
+    const parentOperation = operations.find((item) => item.id === operationId);
+
+    if (!parentOperation) {
+      throw new Error(`Operation not found: ${operationId}`);
+    }
+
+    return operations
+      .filter((operation) => operation.parentOperationId === operationId)
+      .map((operation) => calculateOperationSummary(operation, operations, usageEvents));
   }
 
   /**
