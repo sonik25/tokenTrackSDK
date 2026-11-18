@@ -1,4 +1,3 @@
-
 import type { OperationRecord } from '../storage/storage-adapter.js';
 
 export interface OperationSummaryQuery {

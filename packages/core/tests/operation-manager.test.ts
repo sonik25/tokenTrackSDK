@@ -3,6 +3,7 @@ import { OperationManager } from '../src/operations/operation-manager.js';
 import { OperationContext } from '../src/operations/operation-context.js';
 import type { UsageEvent } from '../src/types/usage-event.js';
 import type { OperationRecord } from '../src/storage/storage-adapter.js';
+import { UsageTracker } from '../src/tracking/usage-tracker.js';
 
 describe('OperationManager', () => {
   let storage: MemoryStorage;
@@ -578,6 +579,38 @@ describe('OperationManager', () => {
       expect(result.totalPages).toBe(3);
       expect(result.hasNextPage).toBe(true);
       expect(result.hasPreviousPage).toBe(true);
+    });
+  });
+
+  it('should include tracked usage in the operation summary', async () => {
+    const tracker = new UsageTracker(storage, context);
+
+    let operationId = '';
+
+    await manager.run('AI Request', async () => {
+      operationId = context.getCurrentOperationId()!;
+
+      await tracker.track({
+        provider: 'openai',
+        model: 'gpt-4o',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          totalTokens: 150,
+        },
+      });
+    });
+
+    const summary = await manager.getSummary(operationId);
+
+    expect(summary.operationId).toBe(operationId);
+    expect(summary.name).toBe('AI Request');
+    expect(summary.status).toBe('completed');
+    expect(summary.usageEventCount).toBe(1);
+    expect(summary.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
     });
   });
 });
