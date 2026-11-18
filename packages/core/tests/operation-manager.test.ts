@@ -201,4 +201,113 @@ describe('OperationManager', () => {
       'Operation not found: unknown-id',
     );
   });
+
+  it('should return summaries for all operations', async () => {
+    let parentId = '';
+    let childId = '';
+
+    await manager.run('parent-operation', async () => {
+      parentId = context.getCurrentOperationId()!;
+
+      childId = await manager.start('child-operation');
+    });
+
+    await storage.saveUsageEvent({
+      id: 'event-1',
+      provider: 'openai',
+      model: 'gpt-4o',
+      operationId: childId,
+      timestamp: new Date().toISOString(),
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+      },
+    });
+
+    const summaries = await manager.getAllSummaries();
+
+    expect(summaries).toHaveLength(2);
+
+    const parentSummary = summaries.find((item) => item.operationId === parentId);
+    const childSummary = summaries.find((item) => item.operationId === childId);
+
+    expect(parentSummary?.usage.inputTokens).toBe(100);
+    expect(parentSummary?.childOperationCount).toBe(1);
+
+    expect(childSummary?.usage.inputTokens).toBe(100);
+    expect(childSummary?.childOperationCount).toBe(0);
+  });
+
+  it('should return an empty array when no operations exist', async () => {
+    const summaries = await manager.getAllSummaries();
+
+    expect(summaries).toEqual([]);
+  });
+
+  it('should return summaries for direct child operations only', async () => {
+    let parentId = '';
+    let childId = '';
+    let grandchildId = '';
+
+    await manager.run('parent-operation', async () => {
+      parentId = context.getCurrentOperationId()!;
+
+      await manager.run('child-operation', async () => {
+        childId = context.getCurrentOperationId()!;
+
+        grandchildId = await manager.start('grandchild-operation');
+      });
+    });
+
+    const childSummaries = await manager.getChildSummaries(parentId);
+
+    expect(childSummaries).toHaveLength(1);
+    expect(childSummaries[0].operationId).toBe(childId);
+    expect(childSummaries[0].name).toBe('child-operation');
+    expect(childSummaries.some((item) => item.operationId === grandchildId)).toBe(false);
+  });
+
+  it('should include descendant usage in direct child summaries', async () => {
+    let parentId = '';
+    let childId = '';
+    let grandchildId = '';
+
+    await manager.run('parent-operation', async () => {
+      parentId = context.getCurrentOperationId()!;
+
+      await manager.run('child-operation', async () => {
+        childId = context.getCurrentOperationId()!;
+
+        grandchildId = await manager.start('grandchild-operation');
+      });
+    });
+
+    await storage.saveUsageEvent({
+      id: 'event-grandchild',
+      provider: 'openai',
+      model: 'gpt-4o',
+      operationId: grandchildId,
+      timestamp: new Date().toISOString(),
+      usage: {
+        inputTokens: 200,
+        outputTokens: 100,
+        totalTokens: 300,
+      },
+    });
+
+    const childSummaries = await manager.getChildSummaries(parentId);
+
+    expect(childSummaries).toHaveLength(1);
+    expect(childSummaries[0].operationId).toBe(childId);
+    expect(childSummaries[0].usage.inputTokens).toBe(200);
+    expect(childSummaries[0].usage.outputTokens).toBe(100);
+    expect(childSummaries[0].usageEventCount).toBe(1);
+  });
+
+  it('should throw an error when retrieving children of an unknown operation', async () => {
+    await expect(manager.getChildSummaries('unknown-id')).rejects.toThrow(
+      'Operation not found: unknown-id',
+    );
+  });
 });

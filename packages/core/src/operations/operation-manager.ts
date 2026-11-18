@@ -96,6 +96,40 @@ export class OperationManager {
   }
 
   /**
+   * Retrieves dynamically calculated summaries for all operations.
+   */
+  async getAllSummaries(): Promise<OperationSummary[]> {
+    const [operations, usageEvents] = await Promise.all([
+      this.storage.getOperations(),
+      this.storage.getUsageEvents(),
+    ]);
+
+    return operations.map((operation) =>
+      calculateOperationSummary(operation, operations, usageEvents),
+    );
+  }
+
+  /**
+   * Retrieves dynamically calculated summaries for direct child operations.
+   */
+  async getChildSummaries(operationId: string): Promise<OperationSummary[]> {
+    const [operations, usageEvents] = await Promise.all([
+      this.storage.getOperations(),
+      this.storage.getUsageEvents(),
+    ]);
+
+    const parentOperation = operations.find((item) => item.id === operationId);
+
+    if (!parentOperation) {
+      throw new Error(`Operation not found: ${operationId}`);
+    }
+
+    return operations
+      .filter((operation) => operation.parentOperationId === operationId)
+      .map((operation) => calculateOperationSummary(operation, operations, usageEvents));
+  }
+
+  /**
    * Runs a callback within an automatically managed operation lifecycle.
    */
   async run<T>(name: string, callback: () => T | Promise<T>): Promise<T> {
