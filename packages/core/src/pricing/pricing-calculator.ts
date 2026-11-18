@@ -1,4 +1,3 @@
-
 import type { EstimatedCost } from '../types/cost.js';
 import type { ModelPricing } from '../types/pricing.js';
 import type { TokenUsage } from '../types/usage.js';
@@ -53,9 +52,7 @@ function formatDecimal(decimal: Decimal): string {
   value = value.padStart(decimal.scale + 1, '0');
 
   const whole = value.slice(0, -decimal.scale);
-  const fraction = value
-    .slice(-decimal.scale)
-    .replace(/0+$/, '');
+  const fraction = value.slice(-decimal.scale).replace(/0+$/, '');
 
   return fraction ? `${whole}.${fraction}` : whole;
 }
@@ -89,48 +86,35 @@ export function calculateEstimatedCost(
   validateTokenCount(outputTokens, 'outputTokens');
 
   const cachedTokens = usage.inputTokenDetails?.cachedTokens ?? 0;
-  const cacheWriteTokens =
-    usage.inputTokenDetails?.cacheWriteTokens ?? 0;
-  const reasoningTokens =
-    usage.outputTokenDetails?.reasoningTokens ?? 0;
+  const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+  const reasoningTokens = usage.outputTokenDetails?.reasoningTokens ?? 0;
 
   validateTokenCount(cachedTokens, 'cachedTokens');
   validateTokenCount(cacheWriteTokens, 'cacheWriteTokens');
   validateTokenCount(reasoningTokens, 'reasoningTokens');
 
   if (cachedTokens + cacheWriteTokens > inputTokens) {
-    throw new RangeError(
-      'Cached and cache-write tokens cannot exceed input tokens',
-    );
+    throw new RangeError('Cached and cache-write tokens cannot exceed input tokens');
   }
 
   if (reasoningTokens > outputTokens) {
-    throw new RangeError(
-      'Reasoning tokens cannot exceed output tokens',
-    );
+    throw new RangeError('Reasoning tokens cannot exceed output tokens');
   }
 
   const rates = pricing.rates;
 
-  const uncachedInputTokens =
-    inputTokens - cachedTokens - cacheWriteTokens;
+  const uncachedInputTokens = inputTokens - cachedTokens - cacheWriteTokens;
 
   const ordinaryOutputTokens = outputTokens - reasoningTokens;
 
   const components = [
     multiplyRateByTokens(rates.inputPerMillion, uncachedInputTokens),
-    multiplyRateByTokens(
-      rates.cachedInputPerMillion ?? rates.inputPerMillion,
-      cachedTokens,
-    ),
+    multiplyRateByTokens(rates.cachedInputPerMillion ?? rates.inputPerMillion, cachedTokens),
     multiplyRateByTokens(
       rates.cacheWriteInputPerMillion ?? rates.inputPerMillion,
       cacheWriteTokens,
     ),
-    multiplyRateByTokens(
-      rates.outputPerMillion,
-      ordinaryOutputTokens,
-    ),
+    multiplyRateByTokens(rates.outputPerMillion, ordinaryOutputTokens),
     multiplyRateByTokens(
       rates.reasoningOutputPerMillion ?? rates.outputPerMillion,
       reasoningTokens,

@@ -19,32 +19,32 @@ describe('UsageEvent', () => {
   });
 
   it('should support estimated and reported costs', () => {
-  const event: UsageEvent = {
-    id: 'event-003',
-    provider: 'openai',
-    model: 'gpt-4o',
-    timestamp: '2026-11-05T12:00:00.000Z',
-    usage: {
-      inputTokens: 100,
-      outputTokens: 50,
-    },
-    cost: {
-      estimatedCost: {
-        amount: '0.002500',
-        currency: 'USD',
-        pricingVersion: '2026-11',
+    const event: UsageEvent = {
+      id: 'event-003',
+      provider: 'openai',
+      model: 'gpt-4o',
+      timestamp: '2026-11-05T12:00:00.000Z',
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
       },
-      reportedCost: {
-        amount: '0.003000',
-        currency: 'USD',
-        source: 'provider',
+      cost: {
+        estimatedCost: {
+          amount: '0.002500',
+          currency: 'USD',
+          pricingVersion: '2026-11',
+        },
+        reportedCost: {
+          amount: '0.003000',
+          currency: 'USD',
+          source: 'provider',
+        },
       },
-    },
-  };
+    };
 
-  expect(event.cost?.estimatedCost?.amount).toBe('0.002500');
-  expect(event.cost?.reportedCost?.amount).toBe('0.003000');
-});
+    expect(event.cost?.estimatedCost?.amount).toBe('0.002500');
+    expect(event.cost?.reportedCost?.amount).toBe('0.003000');
+  });
 
   it('should support optional request and operation metadata', () => {
     const event: UsageEvent = {

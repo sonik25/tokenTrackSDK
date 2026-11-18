@@ -1,4 +1,3 @@
-
 import type { ModelPricing } from '../src/types/pricing.js';
 
 describe('ModelPricing', () => {

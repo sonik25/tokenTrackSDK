@@ -1,4 +1,3 @@
-
 /**
  * Represents a token count reported by an AI provider.
  * Counts should be non-negative integers.

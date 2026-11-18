@@ -1,4 +1,3 @@
-
 import type { CostBreakdown } from '../src/types/cost.js';
 
 describe('CostBreakdown', () => {
@@ -40,8 +39,6 @@ describe('CostBreakdown', () => {
       },
     };
 
-    expect(cost.estimatedCost?.amount).not.toBe(
-      cost.reportedCost?.amount,
-    );
+    expect(cost.estimatedCost?.amount).not.toBe(cost.reportedCost?.amount);
   });
 });

@@ -1,4 +1,3 @@
-
 /**
  * Decimal monetary amount represented as a string.
  *

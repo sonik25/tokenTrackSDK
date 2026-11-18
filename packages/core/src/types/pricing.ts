@@ -1,4 +1,3 @@
-
 import type { CurrencyCode, MoneyAmount } from './money.js';
 import type { ProviderName } from './provider.js';
 
