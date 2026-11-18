@@ -29,3 +29,7 @@ export { OperationManager } from './operations/operation-manager.js';
 export type { OperationSummary } from './operations/operation-summary.js';
 
 export { calculateOperationSummary } from './operations/operation-summary-calculator.js';
+
+export type { OperationSummaryQuery } from './operations/operation-summary-query.js';
+
+export type { PaginatedOperationSummaries } from './operations/paginated-operation-summaries.js';
