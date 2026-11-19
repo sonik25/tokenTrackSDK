@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.test.json" },
+    { "path": "./packages/core/tsconfig.json" },
+    { "path": "./packages/openai/tsconfig.json" },
+    { "path": "./packages/anthropic/tsconfig.json" },
+    { "path": "./packages/gemini/tsconfig.json" }
+  ]
+}

@@ -33,3 +33,9 @@ export { calculateOperationSummary } from './operations/operation-summary-calcul
 export type { OperationSummaryQuery } from './operations/operation-summary-query.js';
 
 export type { PaginatedOperationSummaries } from './operations/paginated-operation-summaries.js';
+
+export type { ProviderAdapter } from './providers/provider-adapter.js';
+
+export { UsageTracker } from './tracking/usage-tracker.js';
+
+export type { TrackUsageInput } from './tracking/usage-tracker.js';
