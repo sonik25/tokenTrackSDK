@@ -2,6 +2,8 @@ import { MemoryStorage } from '../src/storage/memory-storage.js';
 import { OperationManager } from '../src/operations/operation-manager.js';
 import { OperationContext } from '../src/operations/operation-context.js';
 import type { UsageEvent } from '../src/types/usage-event.js';
+import type { OperationRecord } from '../src/storage/storage-adapter.js';
+import { UsageTracker } from '../src/tracking/usage-tracker.js';
 
 describe('OperationManager', () => {
   let storage: MemoryStorage;
@@ -12,6 +14,14 @@ describe('OperationManager', () => {
     storage = new MemoryStorage();
     context = new OperationContext();
     manager = new OperationManager(storage, context);
+  });
+
+  const createOperation = (overrides: Partial<OperationRecord> = {}): OperationRecord => ({
+    id: 'operation-default',
+    name: 'Default Operation',
+    startedAt: '2026-11-18T10:00:00.000Z',
+    status: 'completed',
+    ...overrides,
   });
 
   it('should start a new operation', async () => {
@@ -309,5 +319,298 @@ describe('OperationManager', () => {
     await expect(manager.getChildSummaries('unknown-id')).rejects.toThrow(
       'Operation not found: unknown-id',
     );
+  });
+
+  describe('getSummaries', () => {
+    it('should return the first page with default pagination settings', async () => {
+      for (let index = 0; index < 25; index++) {
+        await storage.saveOperation(
+          createOperation({
+            id: `operation-${index}`,
+            name: `Operation ${index}`,
+            startedAt: new Date(Date.UTC(2026, 10, 18, 10, index)).toISOString(),
+          }),
+        );
+      }
+
+      const result = await manager.getSummaries();
+
+      expect(result.items).toHaveLength(20);
+      expect(result.page).toBe(1);
+      expect(result.pageSize).toBe(20);
+      expect(result.totalItems).toBe(25);
+      expect(result.totalPages).toBe(2);
+      expect(result.hasNextPage).toBe(true);
+      expect(result.hasPreviousPage).toBe(false);
+
+      expect(result.items[0].operationId).toBe('operation-24');
+      expect(result.items[19].operationId).toBe('operation-5');
+    });
+
+    it('should support custom page and page size', async () => {
+      for (let index = 0; index < 5; index++) {
+        await storage.saveOperation(
+          createOperation({
+            id: `custom-operation-${index}`,
+            name: `Custom Operation ${index}`,
+            startedAt: new Date(Date.UTC(2026, 10, 18, 10, index)).toISOString(),
+          }),
+        );
+      }
+
+      const result = await manager.getSummaries({
+        page: 2,
+        pageSize: 2,
+      });
+
+      expect(result.items).toHaveLength(2);
+      expect(result.page).toBe(2);
+      expect(result.pageSize).toBe(2);
+      expect(result.totalItems).toBe(5);
+      expect(result.totalPages).toBe(3);
+      expect(result.hasNextPage).toBe(true);
+      expect(result.hasPreviousPage).toBe(true);
+
+      expect(result.items[0].operationId).toBe('custom-operation-2');
+      expect(result.items[1].operationId).toBe('custom-operation-1');
+    });
+
+    it('should filter summaries by operation status', async () => {
+      await storage.saveOperation(
+        createOperation({
+          id: 'completed-operation',
+          status: 'completed',
+        }),
+      );
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'failed-operation',
+          status: 'failed',
+        }),
+      );
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'running-operation',
+          status: 'running',
+        }),
+      );
+
+      const result = await manager.getSummaries({
+        status: 'failed',
+      });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].operationId).toBe('failed-operation');
+      expect(result.items[0].status).toBe('failed');
+      expect(result.totalItems).toBe(1);
+      expect(result.totalPages).toBe(1);
+    });
+
+    it('should filter summaries by parent operation ID', async () => {
+      await storage.saveOperation(
+        createOperation({
+          id: 'parent-1',
+          name: 'Parent 1',
+        }),
+      );
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'parent-2',
+          name: 'Parent 2',
+        }),
+      );
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'child-1',
+          name: 'Child 1',
+          parentOperationId: 'parent-1',
+        }),
+      );
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'child-2',
+          name: 'Child 2',
+          parentOperationId: 'parent-2',
+        }),
+      );
+
+      const result = await manager.getSummaries({
+        parentOperationId: 'parent-1',
+      });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].operationId).toBe('child-1');
+      expect(result.totalItems).toBe(1);
+    });
+
+    it('should filter summaries by start date range', async () => {
+      await storage.saveOperation(
+        createOperation({
+          id: 'before-range',
+          startedAt: '2026-11-17T10:00:00.000Z',
+        }),
+      );
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'inside-range-1',
+          startedAt: '2026-11-18T10:00:00.000Z',
+        }),
+      );
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'inside-range-2',
+          startedAt: '2026-11-19T10:00:00.000Z',
+        }),
+      );
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'after-range',
+          startedAt: '2026-11-20T10:00:00.000Z',
+        }),
+      );
+
+      const result = await manager.getSummaries({
+        startedAfter: '2026-11-18T00:00:00.000Z',
+        startedBefore: '2026-11-19T23:59:59.999Z',
+      });
+
+      expect(result.items).toHaveLength(2);
+      expect(result.items.map((item) => item.operationId)).toEqual([
+        'inside-range-2',
+        'inside-range-1',
+      ]);
+      expect(result.totalItems).toBe(2);
+    });
+
+    it('should reject invalid pagination values', async () => {
+      await expect(manager.getSummaries({ page: 0 })).rejects.toThrow(
+        'Page must be a positive integer.',
+      );
+
+      await expect(manager.getSummaries({ page: 1.5 })).rejects.toThrow(
+        'Page must be a positive integer.',
+      );
+
+      await expect(manager.getSummaries({ pageSize: 0 })).rejects.toThrow(
+        'Page size must be between 1 and 100.',
+      );
+
+      await expect(manager.getSummaries({ pageSize: 101 })).rejects.toThrow(
+        'Page size must be between 1 and 100.',
+      );
+    });
+
+    it('should reject invalid date filters', async () => {
+      await expect(
+        manager.getSummaries({
+          startedAfter: 'invalid-date',
+        }),
+      ).rejects.toThrow('startedAfter must be a valid date.');
+
+      await expect(
+        manager.getSummaries({
+          startedBefore: 'invalid-date',
+        }),
+      ).rejects.toThrow('startedBefore must be a valid date.');
+
+      await expect(
+        manager.getSummaries({
+          startedAfter: '2026-11-20T00:00:00.000Z',
+          startedBefore: '2026-11-18T00:00:00.000Z',
+        }),
+      ).rejects.toThrow('startedAfter must be earlier than or equal to startedBefore.');
+    });
+
+    it('should return an empty result when requesting a page beyond available results', async () => {
+      await storage.saveOperation(
+        createOperation({
+          id: 'operation-1',
+        }),
+      );
+
+      const result = await manager.getSummaries({
+        page: 3,
+        pageSize: 1,
+      });
+
+      expect(result.items).toEqual([]);
+      expect(result.page).toBe(3);
+      expect(result.totalItems).toBe(1);
+      expect(result.totalPages).toBe(1);
+      expect(result.hasNextPage).toBe(false);
+      expect(result.hasPreviousPage).toBe(true);
+    });
+
+    it('should apply filters before pagination', async () => {
+      for (let index = 0; index < 5; index++) {
+        await storage.saveOperation(
+          createOperation({
+            id: `completed-${index}`,
+            status: 'completed',
+            startedAt: new Date(Date.UTC(2026, 10, 18, 10, index)).toISOString(),
+          }),
+        );
+      }
+
+      await storage.saveOperation(
+        createOperation({
+          id: 'failed-1',
+          status: 'failed',
+        }),
+      );
+
+      const result = await manager.getSummaries({
+        status: 'completed',
+        page: 2,
+        pageSize: 2,
+      });
+
+      expect(result.items).toHaveLength(2);
+      expect(result.items.map((item) => item.operationId)).toEqual(['completed-2', 'completed-1']);
+      expect(result.totalItems).toBe(5);
+      expect(result.totalPages).toBe(3);
+      expect(result.hasNextPage).toBe(true);
+      expect(result.hasPreviousPage).toBe(true);
+    });
+  });
+
+  it('should include tracked usage in the operation summary', async () => {
+    const tracker = new UsageTracker(storage, context);
+
+    let operationId = '';
+
+    await manager.run('AI Request', async () => {
+      operationId = context.getCurrentOperationId()!;
+
+      await tracker.track({
+        provider: 'openai',
+        model: 'gpt-4o',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          totalTokens: 150,
+        },
+      });
+    });
+
+    const summary = await manager.getSummary(operationId);
+
+    expect(summary.operationId).toBe(operationId);
+    expect(summary.name).toBe('AI Request');
+    expect(summary.status).toBe('completed');
+    expect(summary.usageEventCount).toBe(1);
+    expect(summary.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+    });
   });
 });
