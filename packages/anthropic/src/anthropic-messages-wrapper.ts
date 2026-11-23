@@ -1,8 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { Stream } from '@anthropic-ai/sdk/streaming';
+import type { Stream } from '@anthropic-ai/sdk/streaming';
 import type { TrackUsageInput, UsageTracker } from '@tokentrack/core';
 
 import { AnthropicUsageAdapter, type AnthropicUsage } from './anthropic-usage-adapter.js';
+import { TrackedMessageStream } from './tracked-message-stream.js';
 
 type RequestOptions = Parameters<Anthropic['messages']['create']>[1];
 type MessageStream = Stream<Anthropic.RawMessageStreamEvent>;
@@ -56,6 +57,9 @@ export class AnthropicMessagesWrapper {
     async function* iterator() {
       let message: Pick<Anthropic.Message, 'id' | 'model'> | undefined;
       let usage: AnthropicUsage = {};
+      let completed:
+        | { usage: AnthropicUsage; metadata: Omit<TrackUsageInput, 'provider' | 'usage'> }
+        | undefined;
 
       for await (const event of stream) {
         if (event.type === 'message_start') {
@@ -76,22 +80,30 @@ export class AnthropicMessagesWrapper {
               event.usage.cache_creation_input_tokens ?? usage.cache_creation_input_tokens,
           };
         } else if (event.type === 'message_stop' && message) {
-          if (usage.output_tokens != null && !stream.controller.signal.aborted) {
-            await record(usage, {
-              model: message.model,
-              requestId: message.id,
-              streaming: true,
-              durationMs: Math.round(performance.now() - startedAt),
-            });
+          if (Object.values(usage).some((count) => count != null)) {
+            completed = {
+              usage,
+              metadata: {
+                model: message.model,
+                requestId: message.id,
+                streaming: true,
+                durationMs: Math.round(performance.now() - startedAt),
+              },
+            };
           }
           message = undefined;
           usage = {};
         }
         yield event;
       }
+
+      // A trailing transport error or cancellation must not persist a completed event.
+      if (completed && !stream.controller.signal.aborted) {
+        await record(completed.usage, completed.metadata);
+      }
     }
 
-    return new Stream(iterator, stream.controller);
+    return new TrackedMessageStream(iterator, stream.controller);
   }
 
   private async record(
