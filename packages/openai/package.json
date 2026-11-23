@@ -19,5 +19,9 @@
     }
   },
   "module": "./dist/index.js",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@tokentrack/core": "workspace:*",
+    "openai": "7.59.0"
+  }
 }
