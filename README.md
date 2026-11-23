@@ -48,3 +48,35 @@ pnpm --filter @tokentrack/anthropic... build
 pnpm exec tsx examples/anthropic-messages-demo.ts
 pnpm exec tsx examples/anthropic-messages-streaming-demo.ts
 ```
+
+## Gemini Generate Content
+
+Pass an initialized `GoogleGenAI` client and a Core usage tracker to the wrapper.
+
+```ts
+import { GeminiModelsWrapper } from '@tokentrack/gemini';
+
+const models = new GeminiModelsWrapper({ client, usageTracker });
+const params = { model: 'gemini-2.5-flash', contents: 'Explain TypeScript generics.' };
+
+const response = await models.generateContent(params);
+const stream = await models.generateContentStream(params);
+for await (const chunk of stream) {
+  process.stdout.write(chunk.text ?? '');
+}
+```
+
+TokenTrack keeps Gemini's reported total and records cached and thinking tokens
+as usage details. The prompt count already includes cached tokens. If Gemini
+omits the total, TokenTrack computes one only when prompt, candidate, thinking,
+and tool-use prompt counts are all available. Streaming records the latest
+usable usage snapshot after clean exhaustion. Consume the stream inside an
+operation's callback to include its usage in that operation's summary.
+
+Run the mocked demos without credentials.
+
+```sh
+pnpm --filter @tokentrack/gemini... build
+pnpm exec tsx examples/gemini-generate-content-demo.ts
+pnpm exec tsx examples/gemini-streaming-demo.ts
+```
