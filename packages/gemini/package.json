@@ -13,11 +13,20 @@
   "main": "./dist/index.cjs",
   "exports": {
     ".": {
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "module": "./dist/index.js",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@google/genai": "3.6.1",
+    "@tokentrack/core": "workspace:*"
+  }
 }
