@@ -2,7 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { Stream } from '@anthropic-ai/sdk/streaming';
 import { MemoryStorage, OperationContext, UsageTracker } from '@tokentrack/core';
 
-import { AnthropicMessagesWrapper } from '../src/index.js';
+import { AnthropicMessagesWrapper, type AnthropicUsage } from '../src/index.js';
 
 type Event = Anthropic.RawMessageStreamEvent;
 const params: Anthropic.MessageCreateParamsStreaming = {
@@ -28,7 +28,11 @@ const start: Event = {
       cache_creation_input_tokens: 0,
     },
   },
-} as Event;
+} as Anthropic.RawMessageStartEvent;
+
+// The SDK parses JSON without validating required usage fields.
+const startWith = (usage: AnthropicUsage): Event =>
+  ({ ...start, message: { ...start.message, usage } }) as Anthropic.RawMessageStartEvent;
 const content = [
   {
     type: 'content_block_start',
@@ -108,10 +112,39 @@ it('forwards every event by identity and replaces cumulative usage counts', asyn
 });
 
 it('tracks once when the SDK stream is split with tee', async () => {
-  const { storage, stream } = setup(sequence);
+  const { close, storage, stream } = setup(sequence);
   const [left, right] = (await stream()).tee();
   await expect(Promise.all([collect(left), collect(right)])).resolves.toEqual([sequence, sequence]);
   expect(await storage.getUsageEvents()).toHaveLength(1);
+  expect(close).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the source available when only one tee branch closes', async () => {
+  const { close, storage, stream } = setup(sequence);
+  const [left, right] = (await stream()).tee();
+  for await (const event of left) {
+    expect(event).toBe(start);
+    break;
+  }
+  expect(close).not.toHaveBeenCalled();
+  await expect(collect(right)).resolves.toEqual(sequence);
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(await storage.getUsageEvents()).toHaveLength(1);
+});
+
+it('closes the source once when both tee branches return early', async () => {
+  const { close, storage, stream } = setup(sequence);
+  const [left, right] = (await stream()).tee();
+  const leftIterator = left[Symbol.asyncIterator]();
+  const rightIterator = right[Symbol.asyncIterator]();
+  await leftIterator.next();
+  await rightIterator.next();
+  await leftIterator.return?.();
+  expect(close).not.toHaveBeenCalled();
+  await rightIterator.return?.();
+  await rightIterator.return?.();
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(await storage.getUsageEvents()).toHaveLength(0);
 });
 
 it('closes the source when the consumer stops early', async () => {
@@ -124,16 +157,68 @@ it('closes the source when the consumer stops early', async () => {
   expect(await storage.getUsageEvents()).toHaveLength(0);
 });
 
+it('closes the source once on explicit iterator return', async () => {
+  const { close, storage, stream } = setup(sequence);
+  const iterator = (await stream())[Symbol.asyncIterator]();
+  await iterator.next();
+  await expect(iterator.return?.()).resolves.toMatchObject({ done: true });
+  await iterator.return?.();
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(await storage.getUsageEvents()).toHaveLength(0);
+});
+
 it('preserves iteration errors', async () => {
   const error = new Error('Stream failed');
-  const { storage, stream } = setup([start, delta(5, null)], error);
+  const { close, storage, stream } = setup([startWith({ input_tokens: 10 })], error);
+  await expect(collect(await stream())).rejects.toBe(error);
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(await storage.getUsageEvents()).toHaveLength(0);
+});
+
+it('skips tracking when the transport errors after message_stop', async () => {
+  const error = new Error('Trailing stream failure');
+  const { storage, stream } = setup([startWith({ input_tokens: 10 }), stop], error);
   await expect(collect(await stream())).rejects.toBe(error);
   expect(await storage.getUsageEvents()).toHaveLength(0);
 });
 
+it('skips tracking when cancelled after message_stop but before exhaustion', async () => {
+  const { close, storage, stream } = setup([startWith({ input_tokens: 10 }), stop]);
+  for await (const event of await stream()) {
+    if (event === stop) break;
+  }
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(await storage.getUsageEvents()).toHaveLength(0);
+});
+
+it.each([
+  [
+    'input only without a message_delta',
+    [startWith({ input_tokens: 10 }), stop],
+    { inputTokens: 10 },
+  ],
+  ['output only', [startWith({}), delta(5, null), stop], { outputTokens: 5 }],
+  [
+    'cache only',
+    [startWith({ cache_read_input_tokens: 20, cache_creation_input_tokens: 10 }), stop],
+    {
+      inputTokenDetails: { cachedTokens: 20, cacheWriteTokens: 10 },
+    },
+  ],
+  ['explicit zero output', [startWith({}), delta(0, null), stop], { outputTokens: 0 }],
+])('records partial usage for %s', async (_label, events, expected) => {
+  const { storage, stream } = setup(events);
+  await expect(collect(await stream())).resolves.toEqual(events);
+  const recorded = await storage.getUsageEvents();
+  expect(recorded).toHaveLength(1);
+  expect(recorded[0]?.usage).toEqual(expected);
+  expect(recorded[0]?.usage.totalTokens).toBeUndefined();
+});
+
 it.each([
   ['missing message_stop', sequence.slice(0, -1)],
-  ['missing final usage', [start, ...content, stop]],
+  ['missing all usage counts', [startWith({}), stop]],
+  ['only provisional output', [startWith({ output_tokens: 1 }), stop]],
   ['missing message_start', [delta(0, 0), stop]],
 ] satisfies [string, Event[]][])('skips tracking with %s', async (_name, events) => {
   const { storage, stream } = setup(events);
@@ -141,8 +226,8 @@ it.each([
   expect(await storage.getUsageEvents()).toHaveLength(0);
 });
 
-it('preserves the SDK abort controller and propagates abort errors', async () => {
-  const { controller, storage, stream } = setup(sequence);
+it('preserves the SDK abort controller and propagates source abort errors', async () => {
+  const { close, controller, storage, stream } = setup(sequence);
   const result = await stream();
   expect(result.controller).toBe(controller);
   const iterator = result[Symbol.asyncIterator]();
@@ -150,12 +235,14 @@ it('preserves the SDK abort controller and propagates abort errors', async () =>
   const error = new Error('Aborted');
   result.controller.abort(error);
   await expect(iterator.next()).rejects.toBe(error);
+  expect(close).toHaveBeenCalledTimes(1);
   expect(await storage.getUsageEvents()).toHaveLength(0);
 });
 
 it('forwards the final event even when tracking storage fails', async () => {
-  const { storage, stream } = setup(sequence);
+  const { close, storage, stream } = setup(sequence);
   const save = jest.spyOn(storage, 'saveUsageEvent').mockRejectedValue(new Error('Storage failed'));
   await expect(collect(await stream())).resolves.toEqual(sequence);
   expect(save).toHaveBeenCalledTimes(1);
+  expect(close).toHaveBeenCalledTimes(1);
 });
