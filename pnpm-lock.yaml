@@ -26,6 +26,9 @@ importers:
       '@tokentrack/gemini':
         specifier: workspace:*
         version: link:packages/gemini
+      '@tokentrack/openai':
+        specifier: workspace:*
+        version: link:packages/openai
       '@types/jest':
         specifier: ^30.0.0
         version: 30.0.0
@@ -44,6 +47,9 @@ importers:
       jest:
         specifier: ^30.5.2
         version: 30.5.2(@types/node@26.6.6)(supports-color@8.1.1)
+      openai:
+        specifier: 7.59.0
+        version: 7.59.0(google-auth-library@10.9.1(supports-color@8.1.1))(ws@8.23.0)
       prettier:
         specifier: ^3.9.10
         version: 3.9.10
