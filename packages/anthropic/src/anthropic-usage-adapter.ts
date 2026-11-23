@@ -12,12 +12,14 @@ export class AnthropicUsageAdapter implements ProviderAdapter<AnthropicUsage> {
   readonly provider = 'anthropic' as const;
 
   normalizeUsage(usage: AnthropicUsage): TokenUsage {
+    const uncachedTokens = usage.input_tokens ?? undefined;
     const cachedTokens = usage.cache_read_input_tokens ?? undefined;
     const cacheWriteTokens = usage.cache_creation_input_tokens ?? undefined;
+    // Cache counts can be reported even when the complete input count is unknown.
     const inputTokens =
-      usage.input_tokens == null
+      uncachedTokens === undefined
         ? undefined
-        : usage.input_tokens + (cachedTokens ?? 0) + (cacheWriteTokens ?? 0);
+        : uncachedTokens + (cachedTokens ?? 0) + (cacheWriteTokens ?? 0);
     const outputTokens = usage.output_tokens ?? undefined;
 
     return {

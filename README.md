@@ -28,13 +28,18 @@ for await (const event of stream) {
 Pass SDK request options, including an abort signal, as the second argument to `create`.
 The wrapper returns a native promise and supports the raw SSE stream from
 `messages.create({ stream: true })`. The higher-level SDK `messages.stream()` helper
-and `APIPromise` response helpers are outside the wrapper API.
+and the SDK's `APIPromise` helpers `asResponse()` and `withResponse()` are outside
+the wrapper API.
 
 TokenTrack includes uncached, cache-read, and cache-write tokens in `inputTokens`
-and exposes the cache counts separately. Streaming uses the latest cumulative
-counts and records usage when a message reaches `message_stop` with a reported
-final output count. Prompts, system instructions, and generated content are
-excluded from stored usage events.
+and exposes the cache counts separately. Streaming records usage after a
+`message_stop` and clean stream exhaustion when at least one count is known.
+It keeps the latest reported cumulative counts and takes final output usage from
+`message_delta`. Without that count, output remains undefined. Consume the
+stream to exhaustion to record usage, or use the shared controller to abort.
+With `tee()`, each branch can finish independently and closing both branches
+early closes the source. Prompts, system instructions, and generated content
+are excluded from stored usage events.
 
 Run the demos locally without credentials.
 
