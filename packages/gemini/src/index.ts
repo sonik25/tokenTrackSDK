@@ -1,2 +1,2 @@
-// Public entry point for @tokentrack/gemini
-export {};
+export { GeminiUsageAdapter } from './gemini-usage-adapter.js';
+export { GeminiModelsWrapper, type GeminiModelsWrapperOptions } from './gemini-models-wrapper.js';
