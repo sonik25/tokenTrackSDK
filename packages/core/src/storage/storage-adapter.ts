@@ -26,10 +26,25 @@ export interface StorageAdapter {
   getUsageEvents(): Promise<UsageEvent[]>;
 
   // Application operation operations
-  saveOperation(operation: OperationRecord): Promise<void>;
+  /** When supplied, atomically require the current record to have the expected status. */
+  saveOperation(
+    operation: OperationRecord,
+    expectedStatus?: OperationRecord['status'],
+  ): Promise<void>;
 
   getOperations(): Promise<OperationRecord[]>;
 
   // Remove all stored records
   clear(): Promise<void>;
+}
+
+export function requireOperationStatus(
+  operation: OperationRecord | undefined,
+  id: string,
+  expected: OperationRecord['status'],
+): asserts operation is OperationRecord {
+  if (!operation) throw new Error(`Operation not found: ${id}`);
+  if (operation.status !== expected) {
+    throw new Error(`Operation is already ${operation.status}: ${id}`);
+  }
 }

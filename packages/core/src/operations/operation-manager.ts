@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
 import type { OperationRecord, StorageAdapter } from '../storage/storage-adapter.js';
+import { requireOperationStatus } from '../storage/storage-adapter.js';
 import { OperationContext } from './operation-context.js';
 import type { OperationSummary } from './operation-summary.js';
-import { calculateOperationSummary } from './operation-summary-calculator.js';
+import {
+  calculateOperationSummary,
+  createOperationSummaryCalculator,
+} from './operation-summary-calculator.js';
 import type { PaginatedOperationSummaries } from './paginated-operation-summaries.js';
 import type { OperationSummaryQuery } from './operation-summary-query.js';
 
@@ -41,46 +45,26 @@ export class OperationManager {
    * Marks an operation as completed.
    */
   async complete(operationId: string): Promise<void> {
-    const operations = await this.storage.getOperations();
-
-    const operation = operations.find((item) => item.id === operationId);
-
-    if (!operation) {
-      throw new Error(`Operation not found: ${operationId}`);
-    }
-
-    if (operation.status !== 'running') {
-      throw new Error(`Operation is already ${operation.status}: ${operationId}`);
-    }
-
-    await this.storage.saveOperation({
-      ...operation,
-      completedAt: new Date().toISOString(),
-      status: 'completed',
-    });
+    await this.finish(operationId, 'completed');
   }
 
-  /**
-   * Marks an operation as failed.
-   */
+  /** Marks an operation as failed. */
   async fail(operationId: string): Promise<void> {
+    await this.finish(operationId, 'failed');
+  }
+
+  private async finish(operationId: string, status: 'completed' | 'failed'): Promise<void> {
     const operations = await this.storage.getOperations();
-
     const operation = operations.find((item) => item.id === operationId);
-
-    if (!operation) {
-      throw new Error(`Operation not found: ${operationId}`);
-    }
-
-    if (operation.status !== 'running') {
-      throw new Error(`Operation is already ${operation.status}: ${operationId}`);
-    }
-
-    await this.storage.saveOperation({
-      ...operation,
-      completedAt: new Date().toISOString(),
-      status: 'failed',
-    });
+    requireOperationStatus(operation, operationId, 'running');
+    await this.storage.saveOperation(
+      {
+        ...operation,
+        completedAt: new Date().toISOString(),
+        status,
+      },
+      'running',
+    );
   }
 
   /**
@@ -110,9 +94,7 @@ export class OperationManager {
       this.storage.getUsageEvents(),
     ]);
 
-    return operations.map((operation) =>
-      calculateOperationSummary(operation, operations, usageEvents),
-    );
+    return operations.map(createOperationSummaryCalculator(operations, usageEvents));
   }
 
   /**
@@ -184,7 +166,7 @@ export class OperationManager {
 
     const items = filteredOperations
       .slice(startIndex, startIndex + pageSize)
-      .map((operation) => calculateOperationSummary(operation, operations, usageEvents));
+      .map(createOperationSummaryCalculator(operations, usageEvents));
 
     return {
       items,
@@ -214,7 +196,7 @@ export class OperationManager {
 
     return operations
       .filter((operation) => operation.parentOperationId === operationId)
-      .map((operation) => calculateOperationSummary(operation, operations, usageEvents));
+      .map(createOperationSummaryCalculator(operations, usageEvents));
   }
 
   /**

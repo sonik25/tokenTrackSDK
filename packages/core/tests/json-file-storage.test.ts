@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { JsonFileStorage } from '../src/storage/json-file-storage.js';
+import { OperationManager } from '../src/operations/operation-manager.js';
 import type { UsageEvent } from '../src/types/usage-event.js';
 import type { OperationRecord } from '../src/storage/storage-adapter.js';
 
@@ -39,6 +40,50 @@ describe('JsonFileStorage', () => {
 
   afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it('serializes initialization, reads and writes across instances', async () => {
+    const other = new JsonFileStorage(filePath);
+    await Promise.all([
+      storage.initialize(),
+      other.saveUsageEvent(usageEvent),
+      storage.getOperations(),
+      storage.saveUsageEvent({ ...usageEvent, id: 'other' }),
+    ]);
+    expect(await other.getUsageEvents()).toEqual([usageEvent, { ...usageEvent, id: 'other' }]);
+  });
+
+  it('rejects contention without changing the file', async () => {
+    await storage.saveUsageEvent(usageEvent);
+    await writeFile(filePath + '.lock', '', { flag: 'wx' });
+    await expect(storage.clear()).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(JSON.parse(await readFile(filePath, 'utf8')).usageEvents).toEqual([usageEvent]);
+  });
+
+  it('persists only one competing terminal transition across instances', async () => {
+    const first = new OperationManager(storage);
+    const second = new OperationManager(new JsonFileStorage(filePath));
+    const id = await first.start('race');
+    const results = await Promise.allSettled([first.complete(id), second.fail(id)]);
+    expect(results.map(({ status }) => status).sort()).toEqual(['fulfilled', 'rejected']);
+    const [saved] = await storage.getOperations();
+    expect(saved?.status).toBe(results[0]?.status === 'fulfilled' ? 'completed' : 'failed');
+  });
+
+  it('preserves valid partial usage and backs up invalid counts', async () => {
+    const valid = { ...usageEvent, usage: { outputTokenDetails: { reasoningTokens: 0 } } };
+    const invalid = { ...usageEvent, id: 'invalid', usage: { inputTokens: 1.5 } };
+    const content = JSON.stringify({ usageEvents: [valid, invalid], operations: [] });
+    await writeFile(filePath, content);
+    const [first, second] = await Promise.all([
+      storage.getUsageEvents(),
+      new JsonFileStorage(filePath).getUsageEvents(),
+    ]);
+    expect(first).toEqual([valid]);
+    expect(second).toEqual(first);
+    const backups = (await readdir(directory)).filter((name) => name.endsWith('.bak'));
+    expect(backups).toHaveLength(1);
+    expect(await readFile(join(directory, backups[0]!), 'utf8')).toBe(content);
   });
 
   it('should create a storage file when it does not exist', async () => {

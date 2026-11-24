@@ -18,7 +18,6 @@ const latest = Object.freeze(
   Object.assign(new GenerateContentResponse(), {
     responseId: 'stream-123',
     usageMetadata: {
-      promptTokenCount: 12,
       candidatesTokenCount: 5,
       totalTokenCount: 20,
       thoughtsTokenCount: 3,
@@ -74,7 +73,7 @@ it('forwards chunks unchanged and records only the latest usable cumulative snap
     streaming: true,
     usage: {
       inputTokens: 12,
-      outputTokens: 5,
+      outputTokens: 8,
       totalTokens: 20,
       outputTokenDetails: { reasoningTokens: 3 },
     },

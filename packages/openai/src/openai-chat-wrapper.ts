@@ -1,9 +1,10 @@
-
 import type OpenAI from 'openai';
-import type { UsageTracker } from '@tokentrack/core';
+import type { TrackUsageInput, UsageTracker } from '@tokentrack/core';
 
 import { OpenAIUsageAdapter } from './openai-usage-adapter.js';
 import { Stream } from 'openai/core/streaming';
+
+type RequestOptions = Parameters<OpenAI['chat']['completions']['create']>[1];
 
 /**
  * Dependencies required to track OpenAI Chat Completions.
@@ -27,53 +28,57 @@ export class OpenAIChatWrapper {
     this.usageTracker = options.usageTracker;
   }
 
-
- 
   /**
    * Creates a Chat Completion and records token usage.
    */
   create(
     params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+    ...options: [options?: RequestOptions]
   ): Promise<OpenAI.Chat.ChatCompletion>;
 
   create(
     params: OpenAI.Chat.ChatCompletionCreateParamsStreaming,
+    ...options: [options?: RequestOptions]
   ): Promise<Stream<OpenAI.Chat.ChatCompletionChunk>>;
 
   create(
     params: OpenAI.Chat.ChatCompletionCreateParams,
-  ): Promise<
-    OpenAI.Chat.ChatCompletion | Stream<OpenAI.Chat.ChatCompletionChunk>
-  >;
+    ...options: [options?: RequestOptions]
+  ): Promise<OpenAI.Chat.ChatCompletion | Stream<OpenAI.Chat.ChatCompletionChunk>>;
 
   async create(
     params: OpenAI.Chat.ChatCompletionCreateParams,
-  ): Promise<
-    OpenAI.Chat.ChatCompletion | Stream<OpenAI.Chat.ChatCompletionChunk>
-  > {
+    ...options: [options?: RequestOptions]
+  ): Promise<OpenAI.Chat.ChatCompletion | Stream<OpenAI.Chat.ChatCompletionChunk>> {
     const startedAt = performance.now();
 
     if (params.stream === true) {
-      const stream = await this.client.chat.completions.create({
-        ...params,
-        stream: true,
-        stream_options: {
-          ...params.stream_options,
-          include_usage: true,
+      const stream = await this.client.chat.completions.create(
+        {
+          ...params,
+          stream: true,
+          stream_options: {
+            ...params.stream_options,
+            include_usage: true,
+          },
         },
-      });
+        ...options,
+      );
 
       return this.trackStream(stream, startedAt, params.model);
     }
 
-    const response = await this.client.chat.completions.create(params);
+    const response = await this.client.chat.completions.create(params, ...options);
 
     if (response.usage) {
       try {
+        const usage = this.adapter.normalizeUsage(response.usage);
+        if (!Object.values(usage).some((value) => value !== undefined)) return response;
         await this.usageTracker.track({
           provider: this.adapter.provider,
           model: response.model,
-          usage: this.adapter.normalizeUsage(response.usage),
+          requestId: response.id,
+          usage,
           durationMs: Math.round(performance.now() - startedAt),
           streaming: false,
         });
@@ -85,25 +90,35 @@ export class OpenAIChatWrapper {
     return response;
   }
 
+  private trackStream(
+    stream: Stream<OpenAI.Chat.ChatCompletionChunk>,
+    startedAt: number,
+    requestedModel: string,
+  ): Stream<OpenAI.Chat.ChatCompletionChunk> {
+    const tracker = this.usageTracker;
+    const adapter = this.adapter;
 
-
-
-private trackStream(
-  stream: Stream<OpenAI.Chat.ChatCompletionChunk>,
-  startedAt: number,
-  requestedModel: string,
-): Stream<OpenAI.Chat.ChatCompletionChunk> {
-  const tracker = this.usageTracker;
-  const adapter = this.adapter;
-
-  async function* iterator(): AsyncGenerator<OpenAI.Chat.ChatCompletionChunk> {
-    for await (const chunk of stream) {
-      if (chunk.usage) {
-        try {
-          await tracker.track({
-            provider: adapter.provider,
-            model: chunk.model || requestedModel,
+    async function* iterator(): AsyncGenerator<OpenAI.Chat.ChatCompletionChunk> {
+      let finalUsage: Pick<TrackUsageInput, 'usage' | 'model' | 'requestId'> | undefined;
+      for await (const chunk of stream) {
+        if (chunk.choices.length > 0) {
+          finalUsage = undefined;
+        } else if (chunk.usage) {
+          finalUsage = {
             usage: adapter.normalizeUsage(chunk.usage),
+            model: chunk.model || requestedModel,
+            requestId: chunk.id,
+          };
+        }
+        yield chunk;
+      }
+      if (finalUsage && !stream.controller.signal.aborted) {
+        try {
+          if (!Object.values(finalUsage.usage).some((value) => value !== undefined)) return;
+          await tracker.track({
+            ...finalUsage,
+            provider: adapter.provider,
+            status: 'completed',
             durationMs: Math.round(performance.now() - startedAt),
             streaming: true,
           });
@@ -111,14 +126,8 @@ private trackStream(
           // Tracking failures must not interrupt OpenAI streaming.
         }
       }
-
-      yield chunk;
     }
+
+    return new Stream(iterator, stream.controller);
   }
-
-  return new Stream(iterator, stream.controller);
 }
-
-
-}
-

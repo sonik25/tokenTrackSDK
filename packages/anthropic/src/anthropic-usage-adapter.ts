@@ -1,4 +1,5 @@
 import type { ProviderAdapter, TokenUsage } from '@tokentrack/core';
+import { validTokenCount } from '@tokentrack/core';
 
 export interface AnthropicUsage {
   input_tokens?: number | null;
@@ -12,15 +13,17 @@ export class AnthropicUsageAdapter implements ProviderAdapter<AnthropicUsage> {
   readonly provider = 'anthropic' as const;
 
   normalizeUsage(usage: AnthropicUsage): TokenUsage {
-    const uncachedTokens = usage.input_tokens ?? undefined;
-    const cachedTokens = usage.cache_read_input_tokens ?? undefined;
-    const cacheWriteTokens = usage.cache_creation_input_tokens ?? undefined;
+    const uncachedTokens = validTokenCount(usage.input_tokens);
+    const cachedTokens = validTokenCount(usage.cache_read_input_tokens);
+    const cacheWriteTokens = validTokenCount(usage.cache_creation_input_tokens);
     // Cache counts can be reported even when the complete input count is unknown.
     const inputTokens =
-      uncachedTokens === undefined
+      uncachedTokens === undefined ||
+      (usage.cache_read_input_tokens != null && cachedTokens === undefined) ||
+      (usage.cache_creation_input_tokens != null && cacheWriteTokens === undefined)
         ? undefined
-        : uncachedTokens + (cachedTokens ?? 0) + (cacheWriteTokens ?? 0);
-    const outputTokens = usage.output_tokens ?? undefined;
+        : validTokenCount(uncachedTokens + (cachedTokens ?? 0) + (cacheWriteTokens ?? 0));
+    const outputTokens = validTokenCount(usage.output_tokens);
 
     return {
       inputTokens,
@@ -28,7 +31,7 @@ export class AnthropicUsageAdapter implements ProviderAdapter<AnthropicUsage> {
       totalTokens:
         inputTokens === undefined || outputTokens === undefined
           ? undefined
-          : inputTokens + outputTokens,
+          : validTokenCount(inputTokens + outputTokens),
       inputTokenDetails:
         cachedTokens === undefined && cacheWriteTokens === undefined
           ? undefined

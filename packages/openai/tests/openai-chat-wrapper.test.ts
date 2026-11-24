@@ -1,11 +1,6 @@
-
 import type OpenAI from 'openai';
 
-import {
-  MemoryStorage,
-  OperationContext,
-  UsageTracker,
-} from '@tokentrack/core';
+import { MemoryStorage, OperationContext, UsageTracker } from '@tokentrack/core';
 
 import { OpenAIChatWrapper } from '../src/openai-chat-wrapper.js';
 
@@ -51,9 +46,7 @@ describe('OpenAIChatWrapper', () => {
     usageTracker = new UsageTracker(storage, new OperationContext());
   });
 
-  function createWrapper(
-    create: jest.Mock = jest.fn().mockResolvedValue(mockResponse),
-  ) {
+  function createWrapper(create: jest.Mock = jest.fn().mockResolvedValue(mockResponse)) {
     const client = {
       chat: {
         completions: { create },
@@ -99,15 +92,24 @@ describe('OpenAIChatWrapper', () => {
     expect(create).toHaveBeenCalledWith(params);
   });
 
+  it('persists usage metadata without request credentials or message contents', async () => {
+    const { wrapper } = createWrapper();
+    await wrapper.create(params, { headers: { Authorization: 'Bearer mock-private-key' } });
+    const events = await storage.getUsageEvents();
+    expect(events[0]?.requestId).toBe(mockResponse.id);
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain('mock-private-key');
+    expect(serialized).not.toContain('Hello!');
+    expect(serialized).not.toContain('Hello from OpenAI!');
+  });
+
   it('does not record an event when usage is missing', async () => {
     const responseWithoutUsage = {
       ...mockResponse,
       usage: undefined,
     };
 
-    const { wrapper } = createWrapper(
-      jest.fn().mockResolvedValue(responseWithoutUsage),
-    );
+    const { wrapper } = createWrapper(jest.fn().mockResolvedValue(responseWithoutUsage));
 
     await wrapper.create(params);
 
@@ -117,9 +119,7 @@ describe('OpenAIChatWrapper', () => {
   it('preserves OpenAI API errors', async () => {
     const apiError = new Error('OpenAI request failed');
 
-    const { wrapper } = createWrapper(
-      jest.fn().mockRejectedValue(apiError),
-    );
+    const { wrapper } = createWrapper(jest.fn().mockRejectedValue(apiError));
 
     await expect(wrapper.create(params)).rejects.toBe(apiError);
 
@@ -129,9 +129,7 @@ describe('OpenAIChatWrapper', () => {
   it('does not break successful requests when tracking fails', async () => {
     const storageError = new Error('Storage unavailable');
 
-    jest
-      .spyOn(storage, 'saveUsageEvent')
-      .mockRejectedValue(storageError);
+    jest.spyOn(storage, 'saveUsageEvent').mockRejectedValue(storageError);
 
     const { wrapper } = createWrapper();
 

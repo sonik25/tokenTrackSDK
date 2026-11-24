@@ -11,7 +11,7 @@ async function main() {
         id: 'msg_demo',
         type: 'message',
         role: 'assistant',
-        model: 'claude-sonnet-4-5',
+        model: 'mock-claude',
         content: [{ type: 'text', text: 'Hello! This is a dummy Claude response.' }],
         stop_reason: 'end_turn',
         stop_sequence: null,
@@ -23,7 +23,7 @@ async function main() {
     usageTracker: new UsageTracker(storage, new OperationContext()),
   });
   const response = await messages.create({
-    model: 'claude-sonnet-4-5',
+    model: 'mock-claude',
     max_tokens: 100,
     messages: [{ role: 'user', content: 'Say hello.' }],
   });

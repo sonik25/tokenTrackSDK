@@ -1,12 +1,7 @@
-
 import type OpenAI from 'openai';
 import { Stream } from 'openai/core/streaming';
 
-import {
-  MemoryStorage,
-  OperationContext,
-  UsageTracker,
-} from '@tokentrack/core';
+import { MemoryStorage, OperationContext, UsageTracker } from '@tokentrack/core';
 
 import { OpenAIResponsesWrapper } from '../src/openai-responses-wrapper.js';
 
@@ -16,10 +11,7 @@ describe('OpenAIResponsesWrapper streaming', () => {
 
   beforeEach(() => {
     storage = new MemoryStorage();
-    usageTracker = new UsageTracker(
-      storage,
-      new OperationContext(),
-    );
+    usageTracker = new UsageTracker(storage, new OperationContext());
   });
 
   const params = {
@@ -63,9 +55,7 @@ describe('OpenAIResponsesWrapper streaming', () => {
     return new Stream(iterator, new AbortController());
   }
 
-  function createWrapper(
-    stream: Stream<OpenAI.Responses.ResponseStreamEvent>,
-  ) {
+  function createWrapper(stream: Stream<OpenAI.Responses.ResponseStreamEvent>) {
     const create = jest.fn().mockResolvedValue(stream);
 
     const client = {
@@ -82,9 +72,7 @@ describe('OpenAIResponsesWrapper streaming', () => {
   }
 
   it('tracks usage from response.completed', async () => {
-    const { wrapper, create } = createWrapper(
-      createMockStream([completedEvent]),
-    );
+    const { wrapper, create } = createWrapper(createMockStream([completedEvent]));
 
     const stream = await wrapper.create(params);
 
@@ -104,6 +92,8 @@ describe('OpenAIResponsesWrapper streaming', () => {
       provider: 'openai',
       model: 'gpt-4o',
       streaming: true,
+      status: 'completed',
+      requestId: 'resp-123',
       usage: {
         inputTokens: 200,
         outputTokens: 80,
@@ -119,13 +109,10 @@ describe('OpenAIResponsesWrapper streaming', () => {
     });
   });
 
-
-it.each([
-  ['response.incomplete', 'incomplete'],
-  ['response.failed', 'failed'],
-] as const)(
-  'tracks reported usage from %s',
-  async (eventType, status) => {
+  it.each([
+    ['response.incomplete', 'incomplete'],
+    ['response.failed', 'failed'],
+  ] as const)('tracks reported usage from %s', async (eventType, status) => {
     const terminalEvent = {
       ...completedEvent,
       type: eventType,
@@ -135,9 +122,7 @@ it.each([
       },
     } as OpenAI.Responses.ResponseStreamEvent;
 
-    const { wrapper } = createWrapper(
-      createMockStream([terminalEvent]),
-    );
+    const { wrapper } = createWrapper(createMockStream([terminalEvent]));
 
     const stream = await wrapper.create(params);
 
@@ -156,197 +141,183 @@ it.each([
       provider: 'openai',
       model: 'gpt-4o',
       streaming: true,
+      status,
+      requestId: 'resp-123',
       usage: {
         inputTokens: 200,
         outputTokens: 80,
         totalTokens: 280,
       },
     });
-  },
-);
+  });
 
+  it('does not record usage when the response has no usage data', async () => {
+    const eventWithoutUsage = {
+      ...completedEvent,
+      response: {
+        ...completedEvent.response,
+        usage: undefined,
+      },
+    } as OpenAI.Responses.ResponseCompletedEvent;
 
-it('does not record usage when the response has no usage data', async () => {
-  const eventWithoutUsage = {
-    ...completedEvent,
-    response: {
-      ...completedEvent.response,
-      usage: undefined,
-    },
-  } as OpenAI.Responses.ResponseCompletedEvent;
+    const { wrapper } = createWrapper(createMockStream([eventWithoutUsage]));
 
-  const { wrapper } = createWrapper(
-    createMockStream([eventWithoutUsage]),
-  );
+    const stream = await wrapper.create(params);
 
-  const stream = await wrapper.create(params);
-
-  const received: OpenAI.Responses.ResponseStreamEvent[] = [];
-
-  for await (const event of stream) {
-    received.push(event);
-  }
-
-  expect(received).toEqual([eventWithoutUsage]);
-
-  const events = await storage.getUsageEvents();
-
-  expect(events).toHaveLength(0);
-});
-
-
-it('does not track duplicate terminal events for the same response', async () => {
-  const duplicateEvent = {
-    ...completedEvent,
-    sequence_number: 2,
-  } as OpenAI.Responses.ResponseCompletedEvent;
-
-  const { wrapper } = createWrapper(
-    createMockStream([completedEvent, duplicateEvent]),
-  );
-
-  const stream = await wrapper.create(params);
-
-  const received: OpenAI.Responses.ResponseStreamEvent[] = [];
-
-  for await (const event of stream) {
-    received.push(event);
-  }
-
-  expect(received).toEqual([completedEvent, duplicateEvent]);
-
-  const events = await storage.getUsageEvents();
-
-  expect(events).toHaveLength(1);
-  expect(events[0]?.usage.totalTokens).toBe(280);
-});
-
-
-it('continues streaming when usage storage fails', async () => {
-  jest
-    .spyOn(storage, 'saveUsageEvent')
-    .mockRejectedValue(new Error('Storage unavailable'));
-
-  const { wrapper } = createWrapper(
-    createMockStream([completedEvent]),
-  );
-
-  const stream = await wrapper.create(params);
-
-  const received: OpenAI.Responses.ResponseStreamEvent[] = [];
-
-  for await (const event of stream) {
-    received.push(event);
-  }
-
-  expect(received).toEqual([completedEvent]);
-  expect(await storage.getUsageEvents()).toHaveLength(0);
-});
-
-
-it('propagates errors that occur during streaming', async () => {
-  const streamError = new Error('OpenAI stream interrupted');
-
-  const partialEvent = {
-    type: 'response.created',
-    sequence_number: 0,
-    response: completedEvent.response,
-  } as OpenAI.Responses.ResponseStreamEvent;
-
-  async function* failingIterator(): AsyncGenerator<
-    OpenAI.Responses.ResponseStreamEvent
-  > {
-    yield partialEvent;
-    throw streamError;
-  }
-
-  const failingStream = new Stream(
-    failingIterator,
-    new AbortController(),
-  );
-
-  const { wrapper } = createWrapper(failingStream);
-  const stream = await wrapper.create(params);
-
-  const received: OpenAI.Responses.ResponseStreamEvent[] = [];
-
-  await expect(
-    (async () => {
-      for await (const event of stream) {
-        received.push(event);
-      }
-    })(),
-  ).rejects.toBe(streamError);
-
-  expect(received).toEqual([partialEvent]);
-  expect(await storage.getUsageEvents()).toHaveLength(0);
-});
-
-
-it('records usage only once when the stream is split with tee()', async () => {
-  const { wrapper } = createWrapper(
-    createMockStream([completedEvent]),
-  );
-
-  const stream = await wrapper.create(params);
-  const [branchA, branchB] = stream.tee();
-
-  const consume = async (
-    branch: Stream<OpenAI.Responses.ResponseStreamEvent>,
-  ) => {
     const received: OpenAI.Responses.ResponseStreamEvent[] = [];
 
-    for await (const event of branch) {
+    for await (const event of stream) {
       received.push(event);
     }
 
-    return received;
-  };
+    expect(received).toEqual([eventWithoutUsage]);
 
-  const [eventsA, eventsB] = await Promise.all([
-    consume(branchA),
-    consume(branchB),
-  ]);
+    const events = await storage.getUsageEvents();
 
-  expect(eventsA).toEqual([completedEvent]);
-  expect(eventsB).toEqual([completedEvent]);
+    expect(events).toHaveLength(0);
+  });
 
-  const events = await storage.getUsageEvents();
+  it('does not track duplicate terminal events for the same response', async () => {
+    const duplicateEvent = {
+      ...completedEvent,
+      sequence_number: 2,
+    } as OpenAI.Responses.ResponseCompletedEvent;
 
-  expect(events).toHaveLength(1);
-  expect(events[0]?.streaming).toBe(true);
-});
+    const { wrapper } = createWrapper(createMockStream([completedEvent, duplicateEvent]));
 
+    const stream = await wrapper.create(params);
 
-it('propagates cancellation to the underlying OpenAI stream', async () => {
-  const controller = new AbortController();
+    const received: OpenAI.Responses.ResponseStreamEvent[] = [];
 
-  const partialEvent = {
-    type: 'response.created',
-    sequence_number: 0,
-    response: completedEvent.response,
-  } as OpenAI.Responses.ResponseStreamEvent;
+    for await (const event of stream) {
+      received.push(event);
+    }
 
-  async function* iterator(): AsyncGenerator<
-    OpenAI.Responses.ResponseStreamEvent
-  > {
-    yield partialEvent;
-    yield completedEvent;
-  }
+    expect(received).toEqual([completedEvent, duplicateEvent]);
 
-  const sourceStream = new Stream(iterator, controller);
-  const { wrapper } = createWrapper(sourceStream);
+    const events = await storage.getUsageEvents();
 
-  const stream = await wrapper.create(params);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.usage.totalTokens).toBe(280);
+  });
 
-  const readable = stream.toReadableStream();
-  const reader = readable.getReader();
+  it('continues streaming when usage storage fails', async () => {
+    jest.spyOn(storage, 'saveUsageEvent').mockRejectedValue(new Error('Storage unavailable'));
 
-  await reader.read();
-  await reader.cancel();
+    const { wrapper } = createWrapper(createMockStream([completedEvent]));
 
-  expect(controller.signal.aborted).toBe(true);
-  expect(await storage.getUsageEvents()).toHaveLength(0);
-});
+    const stream = await wrapper.create(params);
 
+    const received: OpenAI.Responses.ResponseStreamEvent[] = [];
+
+    for await (const event of stream) {
+      received.push(event);
+    }
+
+    expect(received).toEqual([completedEvent]);
+    expect(await storage.getUsageEvents()).toHaveLength(0);
+  });
+
+  it('records each response ID once and yields the same terminal event objects', async () => {
+    const second = { ...completedEvent, response: { ...completedEvent.response, id: 'resp-456' } };
+    const { wrapper } = createWrapper(createMockStream([completedEvent, second, completedEvent]));
+    const received = [];
+    for await (const event of await wrapper.create(params)) received.push(event);
+    expect(received[0]).toBe(completedEvent);
+    expect(received[1]).toBe(second);
+    expect(received[2]).toBe(completedEvent);
+    expect((await storage.getUsageEvents()).map(({ requestId }) => requestId)).toEqual([
+      'resp-123',
+      'resp-456',
+    ]);
+  });
+
+  it('propagates errors that occur during streaming', async () => {
+    const streamError = new Error('OpenAI stream interrupted');
+
+    const partialEvent = {
+      type: 'response.created',
+      sequence_number: 0,
+      response: completedEvent.response,
+    } as OpenAI.Responses.ResponseStreamEvent;
+
+    async function* failingIterator(): AsyncGenerator<OpenAI.Responses.ResponseStreamEvent> {
+      yield partialEvent;
+      throw streamError;
+    }
+
+    const failingStream = new Stream(failingIterator, new AbortController());
+
+    const { wrapper } = createWrapper(failingStream);
+    const stream = await wrapper.create(params);
+
+    const received: OpenAI.Responses.ResponseStreamEvent[] = [];
+
+    await expect(
+      (async () => {
+        for await (const event of stream) {
+          received.push(event);
+        }
+      })(),
+    ).rejects.toBe(streamError);
+
+    expect(received).toEqual([partialEvent]);
+    expect(await storage.getUsageEvents()).toHaveLength(0);
+  });
+
+  it('records usage only once when the stream is split with tee()', async () => {
+    const { wrapper } = createWrapper(createMockStream([completedEvent]));
+
+    const stream = await wrapper.create(params);
+    const [branchA, branchB] = stream.tee();
+
+    const consume = async (branch: Stream<OpenAI.Responses.ResponseStreamEvent>) => {
+      const received: OpenAI.Responses.ResponseStreamEvent[] = [];
+
+      for await (const event of branch) {
+        received.push(event);
+      }
+
+      return received;
+    };
+
+    const [eventsA, eventsB] = await Promise.all([consume(branchA), consume(branchB)]);
+
+    expect(eventsA).toEqual([completedEvent]);
+    expect(eventsB).toEqual([completedEvent]);
+
+    const events = await storage.getUsageEvents();
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.streaming).toBe(true);
+  });
+
+  it('propagates cancellation to the underlying OpenAI stream', async () => {
+    const controller = new AbortController();
+
+    const partialEvent = {
+      type: 'response.created',
+      sequence_number: 0,
+      response: completedEvent.response,
+    } as OpenAI.Responses.ResponseStreamEvent;
+
+    async function* iterator(): AsyncGenerator<OpenAI.Responses.ResponseStreamEvent> {
+      yield partialEvent;
+      yield completedEvent;
+    }
+
+    const sourceStream = new Stream(iterator, controller);
+    const { wrapper } = createWrapper(sourceStream);
+
+    const stream = await wrapper.create(params);
+
+    const readable = stream.toReadableStream();
+    const reader = readable.getReader();
+
+    await reader.read();
+    await reader.cancel();
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(await storage.getUsageEvents()).toHaveLength(0);
+  });
 });

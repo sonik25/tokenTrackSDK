@@ -1,20 +1,12 @@
-
 import type OpenAI from 'openai';
 
-import {
-  MemoryStorage,
-  OperationContext,
-  UsageTracker,
-} from '@tokentrack/core';
+import { MemoryStorage, OperationContext, UsageTracker } from '@tokentrack/core';
 
 import { OpenAIResponsesWrapper } from '@tokentrack/openai';
 
 async function main() {
   const storage = new MemoryStorage();
-  const tracker = new UsageTracker(
-    storage,
-    new OperationContext(),
-  );
+  const tracker = new UsageTracker(storage, new OperationContext());
 
   const mockResponse = {
     id: 'resp-demo-001',

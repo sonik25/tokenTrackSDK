@@ -63,6 +63,13 @@ describe('UsageTracker', () => {
     expect(event.operationId).toBeUndefined();
   });
 
+  it('uses an explicit operation ID ahead of the active context', async () => {
+    const event = await context.run('active', () =>
+      tracker.track({ provider: 'openai', model: 'mock', operationId: 'explicit', usage: {} }),
+    );
+    expect(event.operationId).toBe('explicit');
+  });
+
   it('should preserve optional tracking metadata', async () => {
     const event = await tracker.track({
       provider: 'openai',

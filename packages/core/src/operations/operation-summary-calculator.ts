@@ -8,27 +8,14 @@ import type { EstimatedCost, ReportedCost } from '../types/cost.js';
  */
 function collectOperationTree(
   rootOperationId: string,
-  operations: OperationRecord[],
+  childrenByParent: Map<string, OperationRecord[]>,
 ): { operationIds: Set<string>; directChildCount: number } {
-  const childrenByParent = new Map<string, OperationRecord[]>();
-
-  for (const operation of operations) {
-    if (!operation.parentOperationId) {
-      continue;
-    }
-
-    const children = childrenByParent.get(operation.parentOperationId) ?? [];
-
-    children.push(operation);
-    childrenByParent.set(operation.parentOperationId, children);
-  }
-
   const operationIds = new Set<string>([rootOperationId]);
   const directChildCount = childrenByParent.get(rootOperationId)?.length ?? 0;
   const pendingIds = [rootOperationId];
 
   while (pendingIds.length > 0) {
-    const parentId = pendingIds.shift()!;
+    const parentId = pendingIds.pop()!;
     const children = childrenByParent.get(parentId) ?? [];
 
     for (const child of children) {
@@ -252,12 +239,49 @@ export function calculateOperationSummary(
   operations: OperationRecord[],
   usageEvents: UsageEvent[],
 ): OperationSummary {
-  const { operationIds, directChildCount } = collectOperationTree(operation.id, operations);
+  return createOperationSummaryCalculator(operations, usageEvents)(operation);
+}
 
-  const includedEvents = usageEvents.filter(
-    (event) => event.operationId !== undefined && operationIds.has(event.operationId),
-  );
+export function createOperationSummaryCalculator(
+  operations: OperationRecord[],
+  usageEvents: UsageEvent[],
+): (operation: OperationRecord) => OperationSummary {
+  const childrenByParent = new Map<string, OperationRecord[]>();
 
+  for (const operation of operations) {
+    if (!operation.parentOperationId) {
+      continue;
+    }
+
+    const children = childrenByParent.get(operation.parentOperationId) ?? [];
+
+    children.push(operation);
+    childrenByParent.set(operation.parentOperationId, children);
+  }
+
+  const eventsByOperation = new Map<string, { index: number; event: UsageEvent }[]>();
+  usageEvents.forEach((event, index) => {
+    if (event.operationId === undefined) return;
+    const entries = eventsByOperation.get(event.operationId) ?? [];
+    entries.push({ index, event });
+    eventsByOperation.set(event.operationId, entries);
+  });
+
+  return (operation) => {
+    const { operationIds, directChildCount } = collectOperationTree(operation.id, childrenByParent);
+    const includedEvents = Array.from(operationIds)
+      .flatMap((id) => eventsByOperation.get(id) ?? [])
+      .sort((left, right) => left.index - right.index)
+      .map(({ event }) => event);
+    return summarize(operation, includedEvents, directChildCount);
+  };
+}
+
+function summarize(
+  operation: OperationRecord,
+  includedEvents: UsageEvent[],
+  directChildCount: number,
+): OperationSummary {
   let durationMs: number | undefined;
 
   if (operation.completedAt) {

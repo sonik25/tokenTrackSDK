@@ -6,6 +6,7 @@ export type {
 } from './types/usage.js';
 
 export type { ProviderName } from './types/provider.js';
+export { validTokenCount } from './types/token-count.js';
 
 export type { UsageEvent } from './types/usage-event.js';
 
@@ -22,6 +23,7 @@ export type { StorageAdapter, OperationRecord } from './storage/storage-adapter.
 export { MemoryStorage } from './storage/memory-storage.js';
 
 export { JsonFileStorage } from './storage/json-file-storage.js';
+export type { JsonFileStorageOptions } from './storage/json-file-storage.js';
 
 export { OperationContext } from './operations/operation-context.js';
 export { OperationManager } from './operations/operation-manager.js';

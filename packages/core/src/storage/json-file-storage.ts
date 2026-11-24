@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 
+import { validTokenCount } from '../types/token-count.js';
 import type { UsageEvent } from '../types/usage-event.js';
 import type { OperationRecord, StorageAdapter } from './storage-adapter.js';
+import { requireOperationStatus } from './storage-adapter.js';
 
 interface StorageData {
   usageEvents: UsageEvent[];
@@ -19,6 +21,38 @@ const EMPTY_STORAGE: StorageData = {
   operations: [],
 };
 
+const transactions = new Map<string, Promise<unknown>>();
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function timestamp(value: unknown): boolean {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
+function counts(value: unknown, keys: string[]): boolean {
+  return (
+    record(value) &&
+    keys.every((key) => value[key] === undefined || validTokenCount(value[key]) !== undefined)
+  );
+}
+
+function cost(value: unknown): boolean {
+  if (!record(value)) return false;
+  return (['estimatedCost', 'reportedCost'] as const).every((key) => {
+    const item = value[key];
+    return (
+      item === undefined ||
+      (record(item) &&
+        typeof item.amount === 'string' &&
+        /^(0|[1-9]\d*)(\.\d+)?$/.test(item.amount) &&
+        typeof item.currency === 'string' &&
+        typeof item[key === 'estimatedCost' ? 'pricingVersion' : 'source'] === 'string')
+    );
+  });
+}
+
 function isUsageEvent(value: unknown): value is UsageEvent {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -28,11 +62,24 @@ function isUsageEvent(value: unknown): value is UsageEvent {
 
   return (
     typeof event.id === 'string' &&
+    event.id.length > 0 &&
     typeof event.provider === 'string' &&
+    event.provider.length > 0 &&
     typeof event.model === 'string' &&
-    typeof event.timestamp === 'string' &&
-    typeof event.usage === 'object' &&
-    event.usage !== null
+    event.model.length > 0 &&
+    timestamp(event.timestamp) &&
+    record(event.usage) &&
+    counts(event.usage, ['inputTokens', 'outputTokens', 'totalTokens']) &&
+    (event.usage.inputTokenDetails === undefined ||
+      counts(event.usage.inputTokenDetails, ['cachedTokens', 'cacheWriteTokens'])) &&
+    (event.usage.outputTokenDetails === undefined ||
+      counts(event.usage.outputTokenDetails, ['reasoningTokens'])) &&
+    (event.attemptNumber === undefined || validTokenCount(event.attemptNumber) !== undefined) &&
+    (event.durationMs === undefined ||
+      (typeof event.durationMs === 'number' &&
+        Number.isFinite(event.durationMs) &&
+        event.durationMs >= 0)) &&
+    (event.cost === undefined || cost(event.cost))
   );
 }
 
@@ -45,8 +92,10 @@ function isOperationRecord(value: unknown): value is OperationRecord {
 
   return (
     typeof operation.id === 'string' &&
+    operation.id.length > 0 &&
     typeof operation.name === 'string' &&
-    typeof operation.startedAt === 'string' &&
+    timestamp(operation.startedAt) &&
+    (operation.completedAt === undefined || timestamp(operation.completedAt)) &&
     ['running', 'completed', 'failed'].includes(operation.status as string)
   );
 }
@@ -54,11 +103,9 @@ function isOperationRecord(value: unknown): value is OperationRecord {
 export class JsonFileStorage implements StorageAdapter {
   private readonly filePath: string;
   private readonly onCorruption?: JsonFileStorageOptions['onCorruption'];
-  private writeQueue: Promise<void> = Promise.resolve();
-  private initialization: Promise<void> | undefined;
 
   constructor(filePath: string, options: JsonFileStorageOptions = {}) {
-    this.filePath = filePath;
+    this.filePath = resolve(filePath);
     this.onCorruption = options.onCorruption;
   }
 
@@ -69,7 +116,7 @@ export class JsonFileStorage implements StorageAdapter {
   private async preserveCorruptedFile(): Promise<string> {
     const backupPath = `${this.filePath}.corrupt-${Date.now()}-${randomUUID()}.bak`;
 
-    await rename(this.filePath, backupPath);
+    await copyFile(this.filePath, backupPath);
 
     return backupPath;
   }
@@ -77,13 +124,14 @@ export class JsonFileStorage implements StorageAdapter {
   private async recoverData(error: Error): Promise<StorageData> {
     const backupPath = await this.preserveCorruptedFile();
 
+    // Read failures must propagate instead of turning a readable history into an empty one.
+    const content = await readFile(backupPath, 'utf-8');
     let recoveredData: StorageData = {
       usageEvents: [],
       operations: [],
     };
 
     try {
-      const content = await readFile(backupPath, 'utf-8');
       const parsed: unknown = JSON.parse(content);
 
       if (typeof parsed === 'object' && parsed !== null) {
@@ -112,44 +160,42 @@ export class JsonFileStorage implements StorageAdapter {
     return structuredClone(recoveredData);
   }
 
-  private enqueueWrite(task: () => Promise<void>): Promise<void> {
-    const write = this.writeQueue.then(task);
-
-    // Keep the queue usable even if one write fails.
-    this.writeQueue = write.catch(() => undefined);
-
-    return write;
+  private async transact<T>(task: () => Promise<T>): Promise<T> {
+    const key = process.platform === 'win32' ? this.filePath.toLowerCase() : this.filePath;
+    const previous = transactions.get(key) ?? Promise.resolve();
+    const transaction = previous
+      .catch(() => undefined)
+      .then(async () => {
+        await this.ensureDirectory();
+        const lock = this.filePath + '.lock';
+        await writeFile(lock, '', { flag: 'wx' });
+        try {
+          return await task();
+        } finally {
+          await unlink(lock);
+        }
+      });
+    transactions.set(key, transaction);
+    try {
+      return await transaction;
+    } finally {
+      if (transactions.get(key) === transaction) transactions.delete(key);
+    }
   }
 
   async initialize(): Promise<void> {
-    if (!this.initialization) {
-      this.initialization = this.initializeFile().catch((error: unknown) => {
-        this.initialization = undefined;
-        throw error;
-      });
-    }
-
-    await this.initialization;
-  }
-
-  private async initializeFile(): Promise<void> {
-    await this.ensureDirectory();
-
-    try {
-      await readFile(this.filePath, 'utf-8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
-
-      await writeFile(this.filePath, JSON.stringify(EMPTY_STORAGE, null, 2), 'utf-8');
-    }
-    // Read the data to ensure the file is valid and recover if necessary.
-    await this.readData();
+    await this.transact(() => this.readData());
   }
 
   private async readData(): Promise<StorageData> {
-    const content = await readFile(this.filePath, 'utf-8');
+    let content: string;
+    try {
+      content = await readFile(this.filePath, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      await this.atomicWrite(EMPTY_STORAGE);
+      return structuredClone(EMPTY_STORAGE);
+    }
     try {
       const data: unknown = JSON.parse(content);
 
@@ -183,25 +229,11 @@ export class JsonFileStorage implements StorageAdapter {
   }
 
   async getUsageEvents(): Promise<UsageEvent[]> {
-    await this.initialize();
-
-    const data = await this.readData();
-
-    return structuredClone(data.usageEvents);
+    return this.transact(async () => (await this.readData()).usageEvents);
   }
 
   async getOperations(): Promise<OperationRecord[]> {
-    await this.initialize();
-
-    const data = await this.readData();
-
-    return structuredClone(data.operations);
-    /*  
-    structuredClone 
-    It prevents callers from modifying the records inside the storage implementation through returned objects.
-
-    For example, changing a retrieved event won't automatically change the data stored in the JSON file.
-    */
+    return this.transact(async () => (await this.readData()).operations);
   }
 
   private async atomicWrite(data: StorageData): Promise<void> {
@@ -220,8 +252,8 @@ export class JsonFileStorage implements StorageAdapter {
   }
 
   async saveUsageEvent(event: UsageEvent): Promise<void> {
-    return this.enqueueWrite(async () => {
-      await this.initialize();
+    return this.transact(async () => {
+      if (!isUsageEvent(event)) throw new Error('Invalid TokenTrack usage event');
 
       const data = await this.readData();
 
@@ -237,13 +269,19 @@ export class JsonFileStorage implements StorageAdapter {
     });
   }
 
-  async saveOperation(operation: OperationRecord): Promise<void> {
-    return this.enqueueWrite(async () => {
-      await this.initialize();
+  async saveOperation(
+    operation: OperationRecord,
+    expectedStatus?: OperationRecord['status'],
+  ): Promise<void> {
+    return this.transact(async () => {
+      if (!isOperationRecord(operation)) throw new Error('Invalid TokenTrack operation');
 
       const data = await this.readData();
 
       const index = data.operations.findIndex((existing) => existing.id === operation.id);
+      if (expectedStatus !== undefined) {
+        requireOperationStatus(data.operations[index], operation.id, expectedStatus);
+      }
 
       if (index >= 0) {
         data.operations[index] = structuredClone(operation);
@@ -256,7 +294,7 @@ export class JsonFileStorage implements StorageAdapter {
   }
 
   async clear(): Promise<void> {
-    return this.enqueueWrite(async () => {
+    return this.transact(async () => {
       await this.atomicWrite(EMPTY_STORAGE);
     });
   }

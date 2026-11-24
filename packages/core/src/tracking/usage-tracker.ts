@@ -18,6 +18,9 @@ export interface TrackUsageInput {
   attemptNumber?: number;
   durationMs?: number;
   streaming?: boolean;
+  status?: UsageEvent['status'];
+  /** Overrides the active operation context when supplied. */
+  operationId?: string;
   cost?: CostBreakdown;
 }
 
@@ -40,11 +43,12 @@ export class UsageTracker {
       model: input.model,
       usage: input.usage,
       timestamp: new Date().toISOString(),
-      operationId: this.context.getCurrentOperationId(),
+      operationId: input.operationId ?? this.context.getCurrentOperationId(),
       requestId: input.requestId,
       attemptNumber: input.attemptNumber,
       durationMs: input.durationMs,
       streaming: input.streaming,
+      status: input.status,
       cost: input.cost,
     };
 

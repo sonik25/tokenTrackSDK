@@ -36,6 +36,9 @@ export interface UsageEvent {
   /** Whether the request used streaming. */
   streaming?: boolean;
 
+  /** Terminal provider outcome when known. Missing means the outcome was not recorded. */
+  status?: 'completed' | 'incomplete' | 'failed';
+
   /** Estimated and provider-reported cost information. */
   cost?: CostBreakdown;
 }

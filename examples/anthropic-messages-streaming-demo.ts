@@ -10,7 +10,7 @@ async function main() {
         id: 'msg_stream_demo',
         type: 'message',
         role: 'assistant',
-        model: 'claude-sonnet-4-5',
+        model: 'mock-claude',
         content: [],
         stop_reason: null,
         stop_sequence: null,
@@ -59,7 +59,7 @@ async function main() {
     usageTracker: new UsageTracker(storage, new OperationContext()),
   });
   const stream = await messages.create({
-    model: 'claude-sonnet-4-5',
+    model: 'mock-claude',
     max_tokens: 100,
     messages: [{ role: 'user', content: 'Say hello.' }],
     stream: true,
