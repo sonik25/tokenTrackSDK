@@ -1,4 +1,3 @@
-
 import type OpenAI from 'openai';
 
 import { OpenAIResponsesUsageAdapter } from '../src/openai-responses-usage-adapter.js';
@@ -46,6 +45,18 @@ describe('OpenAIResponsesUsageAdapter', () => {
     expect(result.outputTokenDetails).toEqual({
       reasoningTokens: 20,
     });
+  });
+
+  it('omits invalid counters while preserving zero', () => {
+    expect(
+      adapter.normalizeUsage({
+        ...usage,
+        input_tokens: Infinity,
+        output_tokens: 0,
+        total_tokens: 1.5,
+        output_tokens_details: { reasoning_tokens: -1 },
+      }),
+    ).toMatchObject({ inputTokens: undefined, outputTokens: 0, totalTokens: undefined });
   });
 
   it('preserves zero token counts', () => {

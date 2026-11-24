@@ -24,6 +24,32 @@ describe('OperationManager', () => {
     ...overrides,
   });
 
+  it('aggregates deep descendants in both bulk and paginated queries over larger histories', async () => {
+    const tracker = new UsageTracker(storage, context);
+    const root = createOperation({ id: 'root' });
+    const child = createOperation({ id: 'child', parentOperationId: root.id });
+    await storage.saveOperation(root);
+    await storage.saveOperation(child);
+    for (let index = 0; index < 250; index++) {
+      const id = `leaf-${index}`;
+      await storage.saveOperation(createOperation({ id, parentOperationId: child.id }));
+      await tracker.track({
+        operationId: id,
+        provider: 'openai',
+        model: 'mock',
+        usage: { inputTokens: 1 },
+      });
+    }
+    const [rootSummary, childSummary] = await manager.getAllSummaries();
+    expect(rootSummary).toMatchObject({
+      usageEventCount: 250,
+      childOperationCount: 1,
+      usage: { inputTokens: 250 },
+    });
+    expect(childSummary).toMatchObject({ usageEventCount: 250, childOperationCount: 250 });
+    expect((await manager.getSummaries({ pageSize: 1 })).items).toEqual([rootSummary]);
+  });
+
   it('should start a new operation', async () => {
     const operationId = await manager.start('test-operation');
 

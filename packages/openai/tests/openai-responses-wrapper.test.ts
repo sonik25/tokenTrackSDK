@@ -1,11 +1,6 @@
-
 import type OpenAI from 'openai';
 
-import {
-  MemoryStorage,
-  OperationContext,
-  UsageTracker,
-} from '@tokentrack/core';
+import { MemoryStorage, OperationContext, UsageTracker } from '@tokentrack/core';
 
 import { OpenAIResponsesWrapper } from '../src/openai-responses-wrapper.js';
 
@@ -91,6 +86,15 @@ describe('OpenAIResponsesWrapper', () => {
     expect(create).toHaveBeenCalledWith(params);
   });
 
+  it('forwards request options and exposes a native promise overload', async () => {
+    create.mockResolvedValue(mockResponse);
+    const options = { signal: new AbortController().signal, timeout: 3000 };
+    const response: Promise<OpenAI.Responses.Response> = wrapper.create(params, options);
+    expect(response.constructor).toBe(Promise);
+    await expect(response).resolves.toBe(mockResponse);
+    expect(create.mock.calls[0]?.[1]).toBe(options);
+  });
+
   it('does not record usage when it is missing', async () => {
     create.mockResolvedValue({
       ...mockResponse,
@@ -114,9 +118,7 @@ describe('OpenAIResponsesWrapper', () => {
   it('does not fail when usage storage throws an error', async () => {
     create.mockResolvedValue(mockResponse);
 
-    jest
-      .spyOn(storage, 'saveUsageEvent')
-      .mockRejectedValue(new Error('Storage unavailable'));
+    jest.spyOn(storage, 'saveUsageEvent').mockRejectedValue(new Error('Storage unavailable'));
 
     await expect(wrapper.create(params)).resolves.toBe(mockResponse);
   });

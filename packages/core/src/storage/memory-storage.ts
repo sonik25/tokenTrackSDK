@@ -1,5 +1,6 @@
 import type { UsageEvent } from '../types/usage-event.js';
 import type { OperationRecord, StorageAdapter } from './storage-adapter.js';
+import { requireOperationStatus } from './storage-adapter.js';
 
 /**
  * In-memory storage implementation for TokenTrack.
@@ -20,7 +21,13 @@ export class MemoryStorage implements StorageAdapter {
     return structuredClone(Array.from(this.usageEvents.values()));
   }
 
-  async saveOperation(operation: OperationRecord): Promise<void> {
+  async saveOperation(
+    operation: OperationRecord,
+    expectedStatus?: OperationRecord['status'],
+  ): Promise<void> {
+    if (expectedStatus !== undefined) {
+      requireOperationStatus(this.operations.get(operation.id), operation.id, expectedStatus);
+    }
     this.operations.set(operation.id, structuredClone(operation));
   }
 

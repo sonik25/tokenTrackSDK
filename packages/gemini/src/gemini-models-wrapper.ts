@@ -1,9 +1,11 @@
 import type {
   GenerateContentParameters,
   GenerateContentResponse,
+  GenerateContentResponseUsageMetadata,
   GoogleGenAI,
 } from '@google/genai';
 import type { TokenUsage, TrackUsageInput, UsageTracker } from '@tokentrack/core';
+import { validTokenCount } from '@tokentrack/core';
 
 import { GeminiUsageAdapter } from './gemini-usage-adapter.js';
 
@@ -21,7 +23,7 @@ export class GeminiModelsWrapper {
   async generateContent(params: GenerateContentParameters): Promise<GenerateContentResponse> {
     const startedAt = performance.now();
     const response = await this.options.client.models.generateContent(params);
-    const usage = this.getUsage(response);
+    const usage = this.getUsage(response.usageMetadata);
     if (usage) {
       await this.record({
         usage,
@@ -48,17 +50,28 @@ export class GeminiModelsWrapper {
     signal: AbortSignal | undefined,
     startedAt: number,
   ): AsyncGenerator<GenerateContentResponse> {
-    let usage: TokenUsage | undefined;
+    const metadata: GenerateContentResponseUsageMetadata = {};
     let model = requestedModel;
     let requestId: string | undefined;
 
     for await (const chunk of stream) {
-      usage = this.getUsage(chunk) ?? usage;
+      for (const field of [
+        'promptTokenCount',
+        'candidatesTokenCount',
+        'cachedContentTokenCount',
+        'thoughtsTokenCount',
+        'toolUsePromptTokenCount',
+        'totalTokenCount',
+      ] as const) {
+        const count = validTokenCount(chunk.usageMetadata?.[field]);
+        if (count !== undefined) metadata[field] = count;
+      }
       model = chunk.modelVersion || model;
       requestId = chunk.responseId || requestId;
       yield chunk;
     }
 
+    const usage = this.getUsage(metadata);
     if (usage && !signal?.aborted) {
       await this.record({
         usage,
@@ -70,9 +83,11 @@ export class GeminiModelsWrapper {
     }
   }
 
-  private getUsage(response: GenerateContentResponse): TokenUsage | undefined {
-    if (!response.usageMetadata) return undefined;
-    const usage = this.adapter.normalizeUsage(response.usageMetadata);
+  private getUsage(
+    metadata: GenerateContentResponseUsageMetadata | undefined,
+  ): TokenUsage | undefined {
+    if (!metadata) return undefined;
+    const usage = this.adapter.normalizeUsage(metadata);
     return Object.values(usage).some((value) => value !== undefined) ? usage : undefined;
   }
 

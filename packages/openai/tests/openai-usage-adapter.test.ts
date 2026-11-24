@@ -1,4 +1,3 @@
-
 import { OpenAIUsageAdapter } from '../src/openai-usage-adapter.js';
 
 describe('OpenAIUsageAdapter', () => {
@@ -50,5 +49,19 @@ describe('OpenAIUsageAdapter', () => {
     expect(result.totalTokens).toBeUndefined();
     expect(result.inputTokenDetails).toBeUndefined();
     expect(result.outputTokenDetails).toBeUndefined();
+  });
+});
+it('preserves zero and omits invalid Chat counters', () => {
+  const usage = new OpenAIUsageAdapter().normalizeUsage({
+    prompt_tokens: -1,
+    completion_tokens: 0,
+    total_tokens: Number.MAX_SAFE_INTEGER + 1,
+    completion_tokens_details: { reasoning_tokens: NaN },
+  });
+  expect(usage).toMatchObject({
+    inputTokens: undefined,
+    outputTokens: 0,
+    totalTokens: undefined,
+    outputTokenDetails: undefined,
   });
 });

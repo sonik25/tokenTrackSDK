@@ -1,22 +1,14 @@
-
 import type OpenAI from 'openai';
 import { Stream } from 'openai/core/streaming';
 
-import {
-  MemoryStorage,
-  OperationContext,
-  UsageTracker,
-} from '@tokentrack/core';
+import { MemoryStorage, OperationContext, UsageTracker } from '@tokentrack/core';
 
 import { OpenAIResponsesWrapper } from '@tokentrack/openai';
 
 async function main() {
   const storage = new MemoryStorage();
 
-  const tracker = new UsageTracker(
-    storage,
-    new OperationContext(),
-  );
+  const tracker = new UsageTracker(storage, new OperationContext());
 
   const finalResponse = {
     id: 'resp-stream-demo-001',
@@ -56,14 +48,11 @@ async function main() {
     },
   ] as OpenAI.Responses.ResponseStreamEvent[];
 
-  const mockStream = new Stream(
-  async function* () {
+  const mockStream = new Stream(async function* () {
     for (const event of events) {
       yield event;
     }
-  },
-  new AbortController(),
-);
+  }, new AbortController());
 
   const client = {
     responses: {

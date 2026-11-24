@@ -78,3 +78,20 @@ it.each([
   expect(normalized.inputTokenDetails).toEqual(expectedDetails);
   expect(normalized.outputTokens).toBe(usage.output_tokens ?? undefined);
 });
+it('omits overflowing totals and malformed Anthropic counts', () => {
+  expect(
+    adapter.normalizeUsage({
+      input_tokens: Number.MAX_SAFE_INTEGER,
+      cache_read_input_tokens: 1,
+      cache_creation_input_tokens: 0,
+      output_tokens: 0,
+    }),
+  ).toMatchObject({ inputTokens: undefined, totalTokens: undefined, outputTokens: 0 });
+  expect(
+    adapter.normalizeUsage({
+      input_tokens: 4,
+      cache_read_input_tokens: Infinity,
+      output_tokens: 1.5,
+    }),
+  ).toEqual({ inputTokens: undefined, totalTokens: undefined, outputTokens: undefined });
+});

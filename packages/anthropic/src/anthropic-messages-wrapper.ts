@@ -1,12 +1,20 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Stream } from '@anthropic-ai/sdk/streaming';
 import type { TrackUsageInput, UsageTracker } from '@tokentrack/core';
+import { validTokenCount } from '@tokentrack/core';
 
 import { AnthropicUsageAdapter, type AnthropicUsage } from './anthropic-usage-adapter.js';
 import { TrackedMessageStream } from './tracked-message-stream.js';
 
 type RequestOptions = Parameters<Anthropic['messages']['create']>[1];
 type MessageStream = Stream<Anthropic.RawMessageStreamEvent>;
+
+function latestCount(
+  current: number | null | undefined,
+  previous: number | null | undefined,
+): number | null | undefined {
+  return validTokenCount(current) ?? previous ?? current;
+}
 
 export interface AnthropicMessagesWrapperOptions {
   client: Anthropic;
@@ -70,14 +78,18 @@ export class AnthropicMessagesWrapper {
             cache_creation_input_tokens: event.message.usage?.cache_creation_input_tokens,
           };
         } else if (event.type === 'message_delta' && event.usage) {
-          // Each delta reports cumulative counts. Null fields leave prior counts intact.
+          // Delta counts are cumulative. Missing or invalid values cannot replace valid counts.
           usage = {
-            input_tokens: event.usage.input_tokens ?? usage.input_tokens,
-            output_tokens: event.usage.output_tokens ?? usage.output_tokens,
-            cache_read_input_tokens:
-              event.usage.cache_read_input_tokens ?? usage.cache_read_input_tokens,
-            cache_creation_input_tokens:
-              event.usage.cache_creation_input_tokens ?? usage.cache_creation_input_tokens,
+            input_tokens: latestCount(event.usage.input_tokens, usage.input_tokens),
+            output_tokens: latestCount(event.usage.output_tokens, usage.output_tokens),
+            cache_read_input_tokens: latestCount(
+              event.usage.cache_read_input_tokens,
+              usage.cache_read_input_tokens,
+            ),
+            cache_creation_input_tokens: latestCount(
+              event.usage.cache_creation_input_tokens,
+              usage.cache_creation_input_tokens,
+            ),
           };
         } else if (event.type === 'message_stop' && message) {
           if (Object.values(usage).some((count) => count != null)) {
@@ -111,10 +123,12 @@ export class AnthropicMessagesWrapper {
     metadata: Omit<TrackUsageInput, 'provider' | 'usage'>,
   ) {
     try {
+      const normalized = this.adapter.normalizeUsage(usage);
+      if (!Object.values(normalized).some((value) => value !== undefined)) return;
       await this.options.usageTracker.track({
         ...metadata,
         provider: this.adapter.provider,
-        usage: this.adapter.normalizeUsage(usage),
+        usage: normalized,
       });
     } catch {
       // Tracking failures must not interrupt successful provider calls.

@@ -3,6 +3,7 @@ import { Stream } from '@anthropic-ai/sdk/streaming';
 import { MemoryStorage, OperationContext, UsageTracker } from '@tokentrack/core';
 
 import { AnthropicMessagesWrapper, type AnthropicUsage } from '../src/index.js';
+import { TrackedMessageStream } from '../src/tracked-message-stream.js';
 
 type Event = Anthropic.RawMessageStreamEvent;
 const params: Anthropic.MessageCreateParamsStreaming = {
@@ -245,4 +246,32 @@ it('forwards the final event even when tracking storage fails', async () => {
   await expect(collect(await stream())).resolves.toEqual(sequence);
   expect(save).toHaveBeenCalledTimes(1);
   expect(close).toHaveBeenCalledTimes(1);
+});
+it('serializes source pulls when one tee branch queues multiple reads before the source resolves', async () => {
+  let resolveFirst!: (result: IteratorResult<number>) => void;
+  const first = new Promise<IteratorResult<number>>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const error = new Error('transport failure');
+  const source = {
+    next: jest.fn().mockReturnValueOnce(first).mockRejectedValueOnce(error),
+    return: jest.fn().mockResolvedValue({ done: true }),
+  };
+  const controller = new AbortController();
+  const [left, right] = new TrackedMessageStream<number>(() => source, controller).tee();
+  const leftIterator = left[Symbol.asyncIterator]();
+  const rightIterator = right[Symbol.asyncIterator]();
+  const leftFirst = leftIterator.next();
+  const leftSecond = expect(leftIterator.next()).rejects.toBe(error);
+  const rightFirst = rightIterator.next();
+  await Promise.resolve();
+  expect(source.next).toHaveBeenCalledTimes(1);
+  resolveFirst({ done: false, value: 1 });
+  await expect(leftFirst).resolves.toEqual({ done: false, value: 1 });
+  await expect(rightFirst).resolves.toEqual({ done: false, value: 1 });
+  await leftSecond;
+  await expect(rightIterator.next()).rejects.toBe(error);
+  await Promise.all([leftIterator.return?.(), rightIterator.return?.()]);
+  expect(source.next).toHaveBeenCalledTimes(2);
+  expect(source.return).toHaveBeenCalledTimes(1);
 });

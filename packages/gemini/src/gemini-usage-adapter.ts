@@ -1,8 +1,12 @@
 import type { GenerateContentResponseUsageMetadata } from '@google/genai';
 import type { ProviderAdapter, TokenUsage } from '@tokentrack/core';
 
-function tokenCount(value: number | undefined): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+import { validTokenCount as tokenCount } from '@tokentrack/core';
+
+function inclusiveCount(base: number | undefined, extra: number | undefined): number | undefined {
+  const count = tokenCount(base);
+  if (count === undefined || (extra != null && tokenCount(extra) === undefined)) return undefined;
+  return tokenCount(count + (extra ?? 0));
 }
 
 /** Normalizes the counts reported by Gemini's Generate Content API. */
@@ -10,8 +14,8 @@ export class GeminiUsageAdapter implements ProviderAdapter<GenerateContentRespon
   readonly provider = 'gemini' as const;
 
   normalizeUsage(metadata: GenerateContentResponseUsageMetadata): TokenUsage {
-    const inputTokens = tokenCount(metadata.promptTokenCount);
-    const outputTokens = tokenCount(metadata.candidatesTokenCount);
+    const inputTokens = inclusiveCount(metadata.promptTokenCount, metadata.toolUsePromptTokenCount);
+    const outputTokens = inclusiveCount(metadata.candidatesTokenCount, metadata.thoughtsTokenCount);
     const cachedTokens = tokenCount(metadata.cachedContentTokenCount);
     const reasoningTokens = tokenCount(metadata.thoughtsTokenCount);
     const toolPromptTokens = tokenCount(metadata.toolUsePromptTokenCount);
@@ -25,7 +29,7 @@ export class GeminiUsageAdapter implements ProviderAdapter<GenerateContentRespon
       reasoningTokens !== undefined &&
       toolPromptTokens !== undefined
     ) {
-      totalTokens = tokenCount(inputTokens + outputTokens + reasoningTokens + toolPromptTokens);
+      totalTokens = tokenCount(inputTokens + outputTokens);
     }
 
     return {

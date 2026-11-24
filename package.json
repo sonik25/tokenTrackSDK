@@ -35,6 +35,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint .",
+    "package:smoke": "node scripts/package-smoke.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   }
